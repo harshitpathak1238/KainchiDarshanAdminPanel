@@ -207,38 +207,122 @@ async function deleteBlogPost(id) {
   }
 }
 
-function blogEditorInsertFormat(command) {
-  const textarea = document.querySelector('#blog-body');
-  if (!textarea) return;
-  const start = textarea.selectionStart;
-  const end = textarea.selectionEnd;
-  const selected = textarea.value.slice(start, end) || 'text';
-  let insert = selected;
-  if (command === 'bold') insert = `**${selected}**`;
-  if (command === 'italic') insert = `*${selected}*`;
-  if (command === 'heading') insert = `\n\n## ${selected}\n`;
-  if (command === 'list') insert = `\n- ${selected}\n`;
-  if (command === 'code') insert = `\n\n\`\`${selected}\`\`\n`;
-  textarea.setRangeText(insert, start, end, 'end');
-  textarea.focus();
+function videoEmbedUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.hostname === 'youtu.be') return `https://www.youtube.com/embed/${url.pathname.slice(1).split('/')[0]}`;
+    if (url.hostname.endsWith('youtube.com')) return url.searchParams.get('v') ? `https://www.youtube.com/embed/${url.searchParams.get('v')}` : url.href;
+    if (url.hostname === 'vimeo.com') return `https://player.vimeo.com/video/${url.pathname.slice(1).split('/')[0]}`;
+    if (url.hostname === 'player.vimeo.com') return url.href;
+  } catch (error) {}
+  return '';
+}
+
+function updateEditorSize(editor) {
+  const warning = editor.wrapper.querySelector('.content-size-warning');
+  const size = new Blob([editor.source.value]).size;
+  warning.textContent = size > 64 * 1024 ? `This field is ${Math.ceil(size / 1024)} KB. Large HTML may slow the editor.` : `${Math.ceil(size / 1024)} KB of HTML`;
+  warning.classList.toggle('warning', size > 64 * 1024);
+}
+
+function insertRichHtml(editor, html) {
+  editor.visual.focus();
+  const selection = window.getSelection();
+  const range = editor.savedRange || (selection?.rangeCount ? selection.getRangeAt(0) : null);
+  if (range && editor.visual.contains(range.commonAncestorContainer)) {
+    selection.removeAllRanges(); selection.addRange(range);
+    document.execCommand('insertHTML', false, html);
+  } else {
+    editor.visual.insertAdjacentHTML('beforeend', html);
+  }
+  editor.source.value = editor.visual.innerHTML;
+  updateEditorSize(editor);
+}
+
+async function openMediaPicker(onSelect) {
+  const existing = document.querySelector('#media-picker');
+  existing?.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div class="drawer-backdrop" id="media-picker-backdrop"></div><section class="media-picker panel" id="media-picker"><div class="drawer-head"><div><p class="eyebrow">Content</p><h2>Choose media</h2></div><button class="btn secondary" type="button" id="close-media-picker">Close</button></div><div class="media-picker-actions"><button class="btn" type="button" id="media-picker-upload">Upload new</button><input type="file" id="media-picker-input" class="hidden" accept="image/jpeg,image/png,image/webp"><span class="subtle">Choose an existing image or upload one.</span></div><div class="media-picker-grid" id="media-picker-grid">${skeleton(3)}</div></section>`);
+  const close = () => { document.querySelector('#media-picker-backdrop')?.remove(); document.querySelector('#media-picker')?.remove(); };
+  document.querySelector('#close-media-picker').onclick = close;
+  document.querySelector('#media-picker-backdrop').onclick = close;
+  document.querySelector('#media-picker-upload').onclick = () => document.querySelector('#media-picker-input').click();
+  document.querySelector('#media-picker-input').onchange = async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const formData = new FormData(); formData.append('file', file);
+      const response = await fetch(`${apiBase}media`, { method: 'POST', headers: { 'X-CSRF-Token': state.csrf }, body: formData });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Upload failed.');
+      onSelect(payload.data || payload); close();
+    } catch (error) { toast(`Image upload failed: ${error.message}`); }
+  };
+  try {
+    const assets = await api('media');
+    document.querySelector('#media-picker-grid').innerHTML = assets.filter(asset => asset.mime_type?.startsWith('image/')).map(asset => `<button type="button" class="media-picker-item" data-url="${escapeHtml(asset.public_url)}" data-name="${escapeHtml(asset.filename)}"><img src="${escapeHtml(asset.public_url)}" alt="${escapeHtml(asset.alt_text || asset.filename)}"><span>${escapeHtml(asset.filename)}</span></button>`).join('') || '<div class="empty">No images in the library yet.</div>';
+    document.querySelectorAll('.media-picker-item').forEach(button => button.onclick = () => { onSelect({ public_url: button.dataset.url, filename: button.dataset.name }); close(); });
+  } catch (error) { document.querySelector('#media-picker-grid').innerHTML = `<div class="empty">Media request failed: ${escapeHtml(error.message)}</div>`; }
+}
+
+function initializeRichEditor(wrapper) {
+  const editor = { wrapper, visual: wrapper.querySelector('[contenteditable]'), source: wrapper.querySelector('textarea'), savedRange: null, sourceMode: false };
+  wrapper._richEditor = editor;
+  const rememberRange = () => { const selection = window.getSelection(); if (selection?.rangeCount && editor.visual.contains(selection.anchorNode)) editor.savedRange = selection.getRangeAt(0).cloneRange(); };
+  const syncSource = () => { editor.source.value = editor.visual.innerHTML; updateEditorSize(editor); };
+  const runCommand = async command => {
+    rememberRange(); editor.visual.focus();
+    if (command === 'link') { const url = prompt('Link URL'); if (url) document.execCommand('createLink', false, url); }
+    else if (command === 'image') await openMediaPicker(asset => { const alt = prompt('Alt text for this image', asset.filename || '') ?? ''; insertRichHtml(editor, `<img class="responsive-image" src="${escapeHtml(asset.public_url)}" alt="${escapeHtml(alt)}">`); });
+    else if (command === 'video') { const url = videoEmbedUrl(prompt('YouTube or Vimeo URL') || ''); if (url) insertRichHtml(editor, `<div class="video-embed"><iframe src="${escapeHtml(url)}" title="Embedded video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`); else toast('Enter a valid YouTube or Vimeo URL.'); }
+    else if (command === 'table') insertRichHtml(editor, '<table><thead><tr><th>Heading</th><th>Heading</th></tr></thead><tbody><tr><td>Cell</td><td>Cell</td></tr></tbody></table><p><br></p>');
+    else if (command === 'h2' || command === 'h3') document.execCommand('formatBlock', false, command.toUpperCase());
+    else if (command === 'blockquote') document.execCommand('formatBlock', false, 'BLOCKQUOTE');
+    else document.execCommand(command, false, null);
+    syncSource();
+  };
+  editor.visual.addEventListener('input', syncSource);
+  editor.visual.addEventListener('keyup', rememberRange);
+  editor.visual.addEventListener('mouseup', rememberRange);
+  editor.source.addEventListener('input', () => updateEditorSize(editor));
+  wrapper.querySelectorAll('[data-editor-command]').forEach(button => { button.addEventListener('mousedown', event => event.preventDefault()); button.onclick = () => runCommand(button.dataset.editorCommand); });
+  wrapper.querySelector('[data-editor-toggle]').onclick = () => {
+    editor.sourceMode = !editor.sourceMode;
+    if (editor.sourceMode) syncSource(); else editor.visual.innerHTML = editor.source.value;
+    editor.visual.classList.toggle('hidden', editor.sourceMode); editor.source.classList.toggle('hidden', !editor.sourceMode);
+    wrapper.querySelector('[data-editor-toggle]').textContent = editor.sourceMode ? 'Visual editor' : 'Edit code';
+  };
+  syncSource();
+  return editor;
+}
+
+function setRichEditorValue(id, value) {
+  const wrapper = document.querySelector(`#${id}-editor`); if (!wrapper?._richEditor) return;
+  const editor = wrapper._richEditor; editor.source.value = value || ''; editor.visual.innerHTML = value || ''; updateEditorSize(editor);
 }
 
 async function blogForm(id = '') {
   const content = document.querySelector('#content');
-  const authorName = state.user?.name || 'Admin';
-  content.innerHTML = `<div class="detail-back"><button onclick="blogPage()">← Posts</button> / Blog editor</div><div class="page-heading"><div><p class="eyebrow">Content</p><h1>${id ? 'Edit post' : 'New post'}</h1></div><div class="actions"><button class="btn secondary" id="blog-preview-btn" type="button">Preview</button><button class="btn" id="blog-save-btn" type="button">Save</button></div></div><div id="blog-save-banner" class="blog-success-banner hidden">Blog saved.</div><form id="blog-editor" class="blog-editor-layout"><div class="blog-main panel"><div class="field blog-field"><label>Title</label><input name="title" class="blog-text-input" required placeholder="Give your story a clear title"></div><div class="field blog-field"><label>URL slug / handle</label><input name="slug" class="blog-text-input" placeholder="your-post-slug"></div><div class="field blog-field"><label>Body HTML</label><div class="editor-toolbar"><button type="button" class="editor-format-btn" data-format="bold">B</button><button type="button" class="editor-format-btn" data-format="italic"><i>I</i></button><button type="button" class="editor-format-btn" data-format="heading">H2</button><button type="button" class="editor-format-btn" data-format="list">• List</button><button type="button" class="editor-format-btn" data-format="code">&lt;/&gt;</button></div><textarea id="blog-body" name="body" rows="18" class="blog-editor-input" placeholder="Write the article or switch to raw HTML."></textarea></div><div class="field blog-field"><label>Excerpt / summary</label><textarea name="excerpt" rows="4" class="blog-editor-input blog-summary-input" placeholder="A short summary for the blog listing and previews."></textarea></div></div><aside class="blog-side-panel panel"><div class="field blog-field"><label>Category</label><input name="category" class="blog-text-input" placeholder="Travel, Guide, Experience..."></div><div class="field blog-field"><label>Primary keyword</label><input name="primaryKeyword" class="blog-text-input" placeholder="Primary keyword"></div><div class="field blog-field"><label>Tags</label><input name="tags" class="blog-text-input" placeholder="Comma separated"></div><div class="field blog-field"><label>SEO title</label><input name="metaTitle" class="blog-text-input" placeholder="SEO title"></div><div class="field blog-field"><label>SEO description</label><textarea name="metaDescription" rows="3" class="blog-editor-input blog-summary-input" placeholder="Short meta description"></textarea></div><div class="field blog-field"><label>Author</label><select name="authorName" class="blog-select"><option value="">Select admin</option><option value="${escapeHtml(authorName)}">${escapeHtml(authorName)}</option></select></div><div class="field blog-field"><label>Status</label><select name="status" class="blog-select"><option value="DRAFT">Draft</option><option value="SCHEDULED">Scheduled</option><option value="PUBLISHED">Published</option><option value="ARCHIVED">Archived</option></select></div><div class="field blog-field"><label>Scheduled publish</label><input name="scheduledAt" class="blog-text-input" type="datetime-local"></div><div class="field blog-field"><label>Featured image</label><div class="image-upload-box"><div class="image-upload-preview" id="featured-image-preview">No image selected</div><div class="featured-upload-actions"><button type="button" class="btn secondary" id="featured-image-trigger">Upload image</button><input type="hidden" name="featuredImage" value=""><input type="file" id="featured-image-input" accept="image/*" class="hidden"><span class="subtle" id="featured-image-name">No file chosen</span></div></div></div><div class="field blog-field"><label>Featured image alt text</label><input name="imageAltText" class="blog-text-input" placeholder="Describe the feature image"></div></aside></form>`;
+  const editorMarkup = (id, name, label, small = false) => `<div class="rich-editor" id="${id}-editor"><div class="rich-toolbar"><button type="button" data-editor-command="bold"><strong>B</strong></button><button type="button" data-editor-command="italic"><em>I</em></button><button type="button" data-editor-command="h2">H2</button><button type="button" data-editor-command="h3">H3</button><button type="button" data-editor-command="insertUnorderedList">• List</button><button type="button" data-editor-command="insertOrderedList">1. List</button><button type="button" data-editor-command="blockquote">Quote</button><button type="button" data-editor-command="link">Link</button>${small ? '' : '<button type="button" data-editor-command="table">Table</button><button type="button" data-editor-command="image">Image</button><button type="button" data-editor-command="video">Video</button>'}<button type="button" class="source-toggle" data-editor-toggle>Edit code</button></div><div class="rich-canvas" contenteditable="true" role="textbox" aria-label="${label}"></div><textarea name="${name}" class="rich-source blog-editor-input hidden" rows="${small ? 5 : 18}" aria-label="${label} HTML"></textarea><div class="content-size-warning">0 KB of HTML</div></div>`;
+  content.innerHTML = `<div class="detail-back"><button onclick="blogPage()">← Posts</button> / Blog editor</div><div class="page-heading"><div><p class="eyebrow">Content</p><h1>${id ? 'Edit post' : 'New post'}</h1></div><div class="actions"><button class="btn secondary" id="blog-preview-btn" type="button">Preview</button><button class="btn" id="blog-save-btn" type="button">Save</button></div></div><div id="blog-save-banner" class="blog-success-banner hidden">Blog saved.</div><form id="blog-editor" class="blog-editor-layout"><div class="blog-main panel"><div class="field blog-field"><label>Title</label><input name="title" class="blog-text-input" required placeholder="Give your story a clear title"></div><div class="field blog-field"><label>URL slug / handle</label><input name="slug" class="blog-text-input" placeholder="your-post-slug"></div><div class="field blog-field"><label>Body</label>${editorMarkup('blog-body', 'body', 'Post body')}</div><div class="field blog-field"><label>Excerpt / summary</label>${editorMarkup('blog-excerpt', 'excerpt', 'Post excerpt', true)}</div></div><aside class="blog-side-panel panel"><div class="field blog-field"><label>Category</label><input name="category" class="blog-text-input" placeholder="Travel, Guide, Experience..."></div><div class="field blog-field"><label>Primary keyword</label><input name="primaryKeyword" class="blog-text-input" placeholder="Primary keyword"></div><div class="field blog-field"><label>Tags</label><input name="tags" class="blog-text-input" placeholder="Comma separated"></div><div class="field blog-field"><label>SEO title</label><input name="metaTitle" class="blog-text-input" placeholder="SEO title"></div><div class="field blog-field"><label>SEO description</label><textarea name="metaDescription" rows="3" class="blog-editor-input blog-summary-input" placeholder="Short meta description"></textarea></div><div class="field blog-field"><label>Author</label><select name="authorId" class="blog-select"><option value="">Loading staff accounts...</option></select></div><div class="field blog-field"><label>Status</label><select name="status" class="blog-select"><option value="DRAFT">Draft</option><option value="SCHEDULED">Scheduled</option><option value="PUBLISHED">Published</option><option value="ARCHIVED">Archived</option></select></div><div class="field blog-field"><label>Scheduled publish</label><input name="scheduledAt" class="blog-text-input" type="datetime-local"></div><div class="field blog-field"><label>Featured image</label><div class="image-upload-box"><div class="image-upload-preview" id="featured-image-preview">No image selected</div><div class="featured-upload-actions"><button type="button" class="btn secondary" id="featured-image-trigger">Upload image</button><input type="hidden" name="featuredImage" value=""><input type="file" id="featured-image-input" accept="image/*" class="hidden"><span class="subtle" id="featured-image-name">No file chosen</span></div></div></div><div class="field blog-field"><label>Featured image alt text</label><input name="imageAltText" class="blog-text-input" placeholder="Describe the feature image"></div></aside></form>`;
 
   const editor = document.querySelector('#blog-editor');
-  const bodyInput = document.querySelector('#blog-body');
+  const bodyEditor = initializeRichEditor(document.querySelector('#blog-body-editor'));
+  initializeRichEditor(document.querySelector('#blog-excerpt-editor'));
   const saveBanner = document.querySelector('#blog-save-banner');
 
   editor.addEventListener('input', () => {
     saveBanner.classList.add('hidden');
   });
 
-  document.querySelectorAll('.editor-format-btn').forEach(button => {
-    button.addEventListener('click', () => blogEditorInsertFormat(button.dataset.format));
-  });
+  document.querySelectorAll('#blog-editor input, #blog-editor select, #blog-editor textarea').forEach(input => input.addEventListener('input', () => saveBanner.classList.add('hidden')));
+
+  try {
+    const authors = await api('blog-authors');
+    const authorSelect = document.querySelector('[name="authorId"]');
+    authorSelect.innerHTML = '<option value="">Select staff account</option>' + authors.map(author => `<option value="${escapeHtml(author.id)}">${escapeHtml(author.name)} · ${escapeHtml(author.role)}</option>`).join('');
+    if (state.user?.id) authorSelect.value = state.user.id;
+  } catch (error) { toast(`Unable to load staff accounts: ${error.message}`); }
 
   document.querySelector('#featured-image-trigger').addEventListener('click', () => {
     document.querySelector('#featured-image-input').click();
@@ -257,7 +341,7 @@ async function blogForm(id = '') {
       });
       const payload = await response.json().catch(() => ({ error: 'Upload failed.' }));
       if (!response.ok) throw new Error(payload.error || 'Upload failed.');
-      const url = payload.public_url || '';
+      const url = payload.data?.public_url || payload.public_url || '';
       document.querySelector('input[name="featuredImage"]').value = url;
       document.querySelector('#featured-image-name').textContent = file.name;
       const preview = document.querySelector('#featured-image-preview');
@@ -274,7 +358,6 @@ async function blogForm(id = '') {
     const data = Object.fromEntries(formData.entries());
     data.tags = (data.tags || '').split(',').map(item => item.trim()).filter(Boolean);
     if (!data.status) data.status = 'DRAFT';
-    if (!data.authorName) data.authorName = state.user?.name || 'Admin';
     try {
       await api(`blog${id ? `/${id}` : ''}`, { method: id ? 'PATCH' : 'POST', body: data });
       saveBanner.classList.remove('hidden');
@@ -288,7 +371,7 @@ async function blogForm(id = '') {
   document.querySelector('#blog-save-btn').addEventListener('click', savePost);
   document.querySelector('#blog-preview-btn').addEventListener('click', () => {
     const previewWindow = window.open('', '_blank', 'noopener,noreferrer');
-    const html = `<!doctype html><html><head><title>${escapeHtml(document.querySelector('input[name="title"]').value || 'Untitled post')}</title><style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#1a1a1a;line-height:1.7}h1,h2{font-weight:700}img{max-width:100%;height:auto;border-radius:10px}p{margin:16px 0}</style></head><body>${(bodyInput?.value || '').replace(/\n/g, '<br>')}</body></html>`;
+    const html = `<!doctype html><html><head><title>${escapeHtml(document.querySelector('input[name="title"]').value || 'Untitled post')}</title><style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#1a1a1a;line-height:1.7}h1,h2{font-weight:700}img{max-width:100%;height:auto;border-radius:10px}p{margin:16px 0}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px}</style></head><body>${bodyEditor.source.value}</body></html>`;
     previewWindow.document.write(html);
     previewWindow.document.close();
   });
@@ -301,17 +384,14 @@ async function blogForm(id = '') {
       const form = document.querySelector('#blog-editor');
       form.querySelector('[name="title"]').value = post.title || '';
       form.querySelector('[name="slug"]').value = post.slug || '';
-      form.querySelector('[name="body"]').value = post.body || '';
-      form.querySelector('[name="excerpt"]').value = post.excerpt || '';
+      setRichEditorValue('blog-body', post.body || '');
+      setRichEditorValue('blog-excerpt', post.excerpt || '');
       form.querySelector('[name="category"]').value = post.category || '';
       form.querySelector('[name="primaryKeyword"]').value = post.primaryKeyword || '';
       form.querySelector('[name="tags"]').value = Array.isArray(post.tags) ? post.tags.join(', ') : (post.tags || '');
       form.querySelector('[name="metaTitle"]').value = post.metaTitle || '';
       form.querySelector('[name="metaDescription"]').value = post.metaDescription || '';
-      if (post.authorName) {
-        const authorSelect = form.querySelector('[name="authorName"]');
-        authorSelect.value = post.authorName;
-      }
+      form.querySelector('[name="authorId"]').value = post.authorId || '';
       form.querySelector('[name="status"]').value = post.status || 'DRAFT';
       form.querySelector('[name="scheduledAt"]').value = post.scheduledAt ? post.scheduledAt.replace(' ', 'T').slice(0, 16) : '';
       form.querySelector('[name="featuredImage"]').value = post.featuredImage || '';

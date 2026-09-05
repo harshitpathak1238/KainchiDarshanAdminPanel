@@ -33,3 +33,78 @@ function page_params(): array { $page=max(1,(int)($_GET['page']??1)); $per=min(1
 function paged(string $sql,array $params,string $countSql, array $countParams=[]): never { [$page,$per,$offset]=page_params(); $total=(int)db()->prepare($countSql)->execute($countParams); $countStmt=db()->prepare($countSql); $countStmt->execute($countParams); $total=(int)$countStmt->fetchColumn(); $stmt=db()->prepare($sql." LIMIT :per OFFSET :offset"); foreach($params as $k=>$v) $stmt->bindValue(is_int($k)?$k+1:$k,$v); $stmt->bindValue(':per',$per,PDO::PARAM_INT); $stmt->bindValue(':offset',$offset,PDO::PARAM_INT); $stmt->execute(); respond($stmt->fetchAll(),200,['page'=>$page,'perPage'=>$per,'total'=>$total,'pages'=>(int)ceil($total/$per)]); }
 function clean_text($value,int $max=500): string { return mb_substr(trim((string)$value),0,$max); }
 function money($value): string { return number_format((float)$value,2,'.',''); }
+function sanitize_html(string $html): string {
+    $allowedTags = ['p','br','strong','b','em','i','u','s','h2','h3','ul','ol','li','blockquote','a','img','table','thead','tbody','tr','th','td','div','span','iframe'];
+    $allowedAttributes = ['class','href','src','alt','title','target','rel','width','height','colspan','rowspan','scope','frameborder','allow','allowfullscreen'];
+    if (!class_exists('DOMDocument')) {
+        $html = preg_replace('/<(script|style|object|embed|form|input|button|textarea|link|meta)\b[^>]*>.*?<\/\1>/is', '', $html);
+        $html = preg_replace('/\son[a-z]+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)/i', '', $html);
+        return preg_replace_callback('/<\/?([a-z0-9]+)([^>]*)>/i', static function (array $match) use ($allowedTags, $allowedAttributes): string {
+            $tag = strtolower($match[1]);
+            if (!in_array($tag, $allowedTags, true) || str_starts_with($match[0], '</')) return in_array($tag, $allowedTags, true) ? "</$tag>" : '';
+            $attributes = preg_replace_callback('/\s+([a-zA-Z_:][a-zA-Z0-9:._-]*)(?:\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+))?/i', static function (array $attribute) use ($allowedAttributes, $tag): string {
+                $name = strtolower($attribute[1]);
+                if (!in_array($name, $allowedAttributes, true) || str_starts_with($name, 'on') || $name === 'style') return '';
+                $value = trim($attribute[2] ?? '', "\\\"'");
+                if (in_array($name, ['src', 'href'], true) && !safe_html_url($value, $tag)) return '';
+                if ($name === 'class') {
+                    $classes = preg_split('/\s+/', $value) ?: [];
+                    $value = implode(' ', array_filter($classes, static fn(string $class): bool => preg_match('/^(cta-box|cta-btn|responsive-image|video-embed|align-left|align-center|align-right)$/', $class) === 1));
+                    if ($value === '') return '';
+                }
+                return ' ' . $name . '="' . htmlspecialchars($value, ENT_QUOTES, 'UTF-8') . '"';
+            }, $match[2]);
+            return '<' . $tag . $attributes . '>';
+        }, $html);
+    }
+    $dom = new DOMDocument('1.0', 'UTF-8');
+    $previous = libxml_use_internal_errors(true);
+    $dom->loadHTML('<!doctype html><html><body><div id="content-root">' . $html . '</div></body></html>');
+    libxml_clear_errors();
+    libxml_use_internal_errors($previous);
+    $root = $dom->getElementById('content-root');
+    if (!$root) return '';
+    $walk = static function (DOMNode $node) use (&$walk, $allowedTags, $allowedAttributes): void {
+        if ($node->nodeType === XML_ELEMENT_NODE) {
+            $tag = strtolower($node->nodeName);
+            if (!in_array($tag, $allowedTags, true)) {
+                while ($node->firstChild) $node->parentNode->insertBefore($node->firstChild, $node);
+                $node->parentNode->removeChild($node);
+                return;
+            }
+            if ($node->hasAttributes()) {
+                for ($index = $node->attributes->length - 1; $index >= 0; $index--) {
+                    $attribute = $node->attributes->item($index);
+                    $name = strtolower($attribute->name);
+                    if (!in_array($name, $allowedAttributes, true) || str_starts_with($name, 'on') || $name === 'style') {
+                        $node->removeAttributeNode($attribute);
+                        continue;
+                    }
+                    if (in_array($name, ['src', 'href'], true) && !safe_html_url($attribute->value, $tag)) $node->removeAttribute($attribute->name);
+                    if ($name === 'class') {
+                        $classes = preg_split('/\s+/', trim($attribute->value)) ?: [];
+                        $classes = array_filter($classes, static fn(string $class): bool => preg_match('/^(cta-box|cta-btn|responsive-image|video-embed|align-left|align-center|align-right)$/', $class) === 1);
+                        if ($classes) $node->setAttribute('class', implode(' ', $classes)); else $node->removeAttribute('class');
+                    }
+                }
+            }
+            if ($tag === 'a' && $node->hasAttribute('target')) $node->setAttribute('rel', 'noopener noreferrer');
+        }
+        foreach (iterator_to_array($node->childNodes) as $child) $walk($child);
+    };
+    foreach (iterator_to_array($root->childNodes) as $child) $walk($child);
+    $result = '';
+    foreach (iterator_to_array($root->childNodes) as $child) $result .= $dom->saveHTML($child);
+    return trim($result);
+}
+function safe_html_url(string $url, string $tag = ''): bool {
+    $url = trim($url);
+    if ($url === '' || preg_match('/[\x00-\x20]/', $url)) return false;
+    if (str_starts_with($url, '//')) return false;
+    if (str_starts_with($url, '/') || str_starts_with($url, '#')) return true;
+    if (!str_contains($url, ':')) return true;
+    if (!filter_var($url, FILTER_VALIDATE_URL)) return false;
+    $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+    if ($tag === 'iframe') return in_array(strtolower((string) parse_url($url, PHP_URL_HOST)), ['www.youtube.com','youtube.com','www.youtube-nocookie.com','player.vimeo.com','vimeo.com'], true) && $scheme === 'https';
+    return in_array($scheme, ['http','https'], true);
+}
