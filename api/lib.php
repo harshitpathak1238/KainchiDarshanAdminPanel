@@ -33,7 +33,45 @@ function page_params(): array { $page=max(1,(int)($_GET['page']??1)); $per=min(1
 function paged(string $sql,array $params,string $countSql, array $countParams=[]): never { [$page,$per,$offset]=page_params(); $total=(int)db()->prepare($countSql)->execute($countParams); $countStmt=db()->prepare($countSql); $countStmt->execute($countParams); $total=(int)$countStmt->fetchColumn(); $stmt=db()->prepare($sql." LIMIT :per OFFSET :offset"); foreach($params as $k=>$v) $stmt->bindValue(is_int($k)?$k+1:$k,$v); $stmt->bindValue(':per',$per,PDO::PARAM_INT); $stmt->bindValue(':offset',$offset,PDO::PARAM_INT); $stmt->execute(); respond($stmt->fetchAll(),200,['page'=>$page,'perPage'=>$per,'total'=>$total,'pages'=>(int)ceil($total/$per)]); }
 function clean_text($value,int $max=500): string { return mb_substr(trim((string)$value),0,$max); }
 function money($value): string { return number_format((float)$value,2,'.',''); }
+function media_directory(): string {
+    global $config;
+    return $config['app']['uploads_dir'] ?? (__DIR__ . '/../storage/uploads');
+}
+function media_metadata_path(): string { return media_directory() . DIRECTORY_SEPARATOR . '.media.json'; }
+function media_metadata(): array {
+    $path = media_metadata_path();
+    if (!is_file($path)) return [];
+    $data = json_decode((string) file_get_contents($path), true);
+    return is_array($data) ? $data : [];
+}
+function save_media_metadata(array $metadata): void {
+    file_put_contents(media_metadata_path(), json_encode($metadata, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT), LOCK_EX);
+}
+function media_filename(string $filename): string {
+    $filename = basename($filename);
+    if ($filename === '' || $filename === '.' || $filename === '..' || str_starts_with($filename, '.')) fail('Invalid media file.', 422);
+    return $filename;
+}
+function html_fragment(string $html): string {
+    $html = preg_replace('/^\s*<!doctype\s+html[^>]*>/i', '', $html);
+    if (!class_exists('DOMDocument')) {
+        $html = preg_replace('/<head\b[^>]*>.*?<\/head>/is', '', $html);
+        $html = preg_replace('/<style\b[^>]*>.*?<\/style>/is', '', $html);
+        return trim(preg_replace('/<\/?(?:html|body)\b[^>]*>/i', '', $html));
+    }
+    $dom = new DOMDocument('1.0', 'UTF-8');
+    $previous = libxml_use_internal_errors(true);
+    $dom->loadHTML($html);
+    libxml_clear_errors();
+    libxml_use_internal_errors($previous);
+    $body = $dom->getElementsByTagName('body')->item(0);
+    if (!$body) return trim($html);
+    $fragment = '';
+    foreach (iterator_to_array($body->childNodes) as $child) $fragment .= $dom->saveHTML($child);
+    return trim($fragment);
+}
 function sanitize_html(string $html): string {
+    $html = html_fragment($html);
     $allowedTags = ['p','br','strong','b','em','i','u','s','h2','h3','ul','ol','li','blockquote','a','img','table','thead','tbody','tr','th','td','div','span','iframe'];
     $allowedAttributes = ['class','href','src','alt','title','target','rel','width','height','colspan','rowspan','scope','frameborder','allow','allowfullscreen'];
     if (!class_exists('DOMDocument')) {

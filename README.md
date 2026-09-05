@@ -12,6 +12,7 @@ A Hostinger-ready admin console built with PHP 8+, MySQL/MariaDB, semantic HTML,
 5. Enable HTTPS, set `secure_cookies` to `true`, and open `/admin/` on the existing domain.
 6. Open `/admin/` and enter one of the three allowlisted admin emails configured in `api/lib.php`. No password is used by this login flow.
 7. Add a cron job to call `cron/publish_scheduled.php` every five minutes if scheduled blog publishing is needed.
+8. After deploying the rich blog editor update, run `php scripts/migrate_blog_body_fragments.php --dry-run`, review the affected posts, then run `php scripts/migrate_blog_body_fragments.php` once to convert any saved full HTML documents into content fragments.
 
 ## Local smoke test
 

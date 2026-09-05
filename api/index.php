@@ -147,10 +147,32 @@ try {
         respond(['id' => $id, 'status' => $next]);
     }
 
+    if ($resource === 'media' && $id && $method === 'POST') {
+        require_csrf();
+        $filename = media_filename($id);
+        $directory = media_directory();
+        $path = $directory . DIRECTORY_SEPARATOR . $filename;
+        if (!is_file($path)) fail('Media file not found.', 404);
+        if (empty($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) fail('Replacement file was not received.', 422);
+        $file = $_FILES['file'];
+        $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+        $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'video/mp4' => 'mp4', 'video/quicktime' => 'mov'];
+        $limit = str_starts_with($mime, 'video/') ? 100 * 1024 * 1024 : 10 * 1024 * 1024;
+        if (!isset($allowed[$mime]) || (int) $file['size'] > $limit) fail('Replacement file type or size is not supported.', 422);
+        $temporary = $path . '.replacement-' . bin2hex(random_bytes(6));
+        if (!move_uploaded_file($file['tmp_name'], $temporary) || !rename($temporary, $path)) fail('Replacement file could not be stored.', 500);
+        $metadata = media_metadata();
+        $metadata[$filename]['display_name'] = $metadata[$filename]['display_name'] ?? $file['name'];
+        $metadata[$filename]['updated_at'] = gmdate('c');
+        save_media_metadata($metadata);
+        audit('replace', 'media', $filename, ['mime' => $mime, 'size' => (int) $file['size']]);
+        respond(['filename' => $filename, 'public_url' => rtrim($config['app']['uploads_url'] ?? 'storage/uploads', '/') . '/' . rawurlencode($filename), 'mime_type' => $mime, 'size_bytes' => (int) $file['size']]);
+    }
+
     if ($resource === 'media' && $method === 'POST') {
         require_csrf();
         global $config;
-        $directory = $config['app']['uploads_dir'] ?? (__DIR__ . '/../storage/uploads');
+        $directory = media_directory();
         if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
             fail('Upload failed: the storage directory is not writable.', 500);
         }
@@ -169,23 +191,53 @@ try {
             fail('Upload failed: Hostinger could not write the file to storage.', 500);
         }
         $url = rtrim($config['app']['uploads_url'] ?? 'storage/uploads', '/') . '/' . rawurlencode($safeName);
+        $metadata = media_metadata();
+        $metadata[$safeName] = ['display_name' => $file['name'], 'alt_text' => '', 'updated_at' => gmdate('c')];
+        save_media_metadata($metadata);
         audit('upload', 'media', null, ['filename' => $safeName, 'mime' => $mime, 'size' => (int) $file['size']]);
         respond(['filename' => $safeName, 'public_url' => $url, 'mime_type' => $mime, 'size_bytes' => (int) $file['size'], 'usage_count' => 0]);
     }
 
+    if ($resource === 'media' && $id && $method === 'PATCH') {
+        require_csrf();
+        $filename = media_filename($id);
+        $path = media_directory() . DIRECTORY_SEPARATOR . $filename;
+        if (!is_file($path)) fail('Media file not found.', 404);
+        $input = json_input();
+        $metadata = media_metadata();
+        $current = $metadata[$filename] ?? [];
+        $displayName = clean_text($input['display_name'] ?? $current['display_name'] ?? $filename, 190);
+        if ($displayName === '') $displayName = $filename;
+        $metadata[$filename] = ['display_name' => $displayName, 'alt_text' => clean_text($input['alt_text'] ?? $current['alt_text'] ?? '', 255), 'updated_at' => gmdate('c')];
+        save_media_metadata($metadata);
+        audit('edit', 'media', $filename);
+        respond(['filename' => $filename, 'display_name' => $displayName, 'alt_text' => $metadata[$filename]['alt_text']]);
+    }
+
+    if ($resource === 'media' && $id && $method === 'DELETE') {
+        require_csrf();
+        $filename = media_filename($id);
+        $path = media_directory() . DIRECTORY_SEPARATOR . $filename;
+        if (!is_file($path)) fail('Media file not found.', 404);
+        if (!unlink($path)) fail('Media file could not be deleted.', 500);
+        $metadata = media_metadata(); unset($metadata[$filename]); save_media_metadata($metadata);
+        audit('delete', 'media', $filename);
+        respond(['deleted' => true]);
+    }
+
     if ($resource === 'media' && $method === 'GET') {
         global $config;
-        $directory = $config['app']['uploads_dir'] ?? (__DIR__ . '/../storage/uploads');
+        $directory = media_directory();
         if (!is_dir($directory)) {
             mkdir($directory, 0755, true);
         }
-        $files = [];
+        $files = []; $metadata = media_metadata();
         foreach (scandir($directory) ?: [] as $filename) {
             if ($filename === '.' || $filename === '..' || str_starts_with($filename, '.')) continue;
             $path = $directory . DIRECTORY_SEPARATOR . $filename;
             if (!is_file($path)) continue;
             $mime = function_exists('mime_content_type') ? mime_content_type($path) : 'application/octet-stream';
-            $files[] = ['filename' => $filename, 'public_url' => rtrim($config['app']['uploads_url'] ?? 'storage/uploads', '/') . '/' . rawurlencode($filename), 'mime_type' => $mime, 'size_bytes' => filesize($path), 'alt_text' => '', 'usage_count' => 0, 'created_at' => gmdate('Y-m-d H:i:s', filemtime($path))];
+            $files[] = ['filename' => $filename, 'display_name' => $metadata[$filename]['display_name'] ?? $filename, 'public_url' => rtrim($config['app']['uploads_url'] ?? 'storage/uploads', '/') . '/' . rawurlencode($filename), 'mime_type' => $mime, 'size_bytes' => filesize($path), 'alt_text' => $metadata[$filename]['alt_text'] ?? '', 'usage_count' => 0, 'created_at' => gmdate('Y-m-d H:i:s', filemtime($path))];
         }
         usort($files, static fn(array $left, array $right): int => strcmp($right['created_at'], $left['created_at']));
         respond($files);
@@ -244,6 +296,7 @@ try {
         $slug = trim((string) ($input['slug'] ?? preg_replace('/[^a-z0-9]+/i', '-', strtolower((string) $input['title']))), '-');
         $body = sanitize_html((string) $input['body']);
         $excerpt = sanitize_html((string) ($input['excerpt'] ?? ''));
+        if (trim(strip_tags($body)) === '') fail('Blog post could not be saved.', 422, ['body' => 'Add meaningful post content before saving.']);
         $authorId = clean_text($input['authorId'] ?? actor()['id'] ?? '', 191);
         $authorStmt = db()->prepare("SELECT id, name FROM `User` WHERE id = ? AND role IN ('OWNER','ADMIN','STAFF') AND isActive = 1 LIMIT 1");
         $authorStmt->execute([$authorId]);
