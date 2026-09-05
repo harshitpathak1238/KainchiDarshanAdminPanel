@@ -7,15 +7,11 @@ RewriteEngine On
 </FilesMatch>
 RewriteRule ^(private|storage/private)(/|$) - [F,L]
 
-# The admin console is intentionally available at the requested /admin routes.
-RewriteRule ^admin/assets/(.*)$ public/assets/$1 [L]
-RewriteRule ^admin/api/(.*)$ api/index.php [QSA,L]
-RewriteRule ^admin/?$ index.php [QSA,L]
-
-# JSON API requests are handled by the PHP front controller.
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
+# This project is deployed into the existing website's /admin directory.
+# These rules are relative to /admin, so the frontend at the site root is untouched.
+RewriteRule ^assets/(.*)$ public/assets/$1 [L]
 RewriteRule ^api/(.*)$ api/index.php [QSA,L]
+RewriteRule ^$ index.php [L]
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.php [QSA,L]
