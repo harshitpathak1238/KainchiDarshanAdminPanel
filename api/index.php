@@ -124,6 +124,32 @@ try {
         respond(['id' => $id, 'status' => $next]);
     }
 
+    if ($resource === 'media' && $method === 'POST') {
+        require_csrf();
+        global $config;
+        $directory = $config['app']['uploads_dir'] ?? (__DIR__ . '/../storage/uploads');
+        if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
+            fail('Upload failed: the storage directory is not writable.', 500);
+        }
+        if (empty($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+            fail('Upload failed: no file was received or the upload was interrupted.', 422);
+        }
+        $file = $_FILES['file'];
+        $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+        $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'video/mp4' => 'mp4', 'video/quicktime' => 'mov'];
+        $isVideo = str_starts_with($mime, 'video/');
+        $limit = $isVideo ? 100 * 1024 * 1024 : 10 * 1024 * 1024;
+        if (!isset($allowed[$mime])) fail('Upload failed: only JPG, PNG, WebP, MP4, and MOV files are supported.', 422);
+        if ((int) $file['size'] > $limit) fail('Upload failed: this file is larger than the allowed limit.', 422);
+        $safeName = bin2hex(random_bytes(12)) . '.' . $allowed[$mime];
+        if (!move_uploaded_file($file['tmp_name'], $directory . DIRECTORY_SEPARATOR . $safeName)) {
+            fail('Upload failed: Hostinger could not write the file to storage.', 500);
+        }
+        $url = rtrim($config['app']['uploads_url'] ?? 'storage/uploads', '/') . '/' . rawurlencode($safeName);
+        audit('upload', 'media', null, ['filename' => $safeName, 'mime' => $mime, 'size' => (int) $file['size']]);
+        respond(['filename' => $safeName, 'public_url' => $url, 'mime_type' => $mime, 'size_bytes' => (int) $file['size'], 'usage_count' => 0]);
+    }
+
     if ($resource === 'media' && $method === 'GET') {
         global $config;
         $directory = $config['app']['uploads_dir'] ?? (__DIR__ . '/../storage/uploads');
