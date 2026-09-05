@@ -175,7 +175,7 @@ async function loadBlog() {
         <div class="blog-row">
           <div class="blog-col post-col">
             <div class="blog-post-main">
-              <div class="blog-post-icon">✎</div>
+              <div class="blog-featured-thumb">${post.featuredImage ? `<img src="${escapeHtml(post.featuredImage)}" alt="${escapeHtml(post.imageAltText || post.title || 'Featured image')}">` : '<span aria-hidden="true">▧</span>'}</div>
               <div class="blog-post-copy">
                 <div class="blog-title">${escapeHtml(post.title)}</div>
                 <div class="blog-slug">/${escapeHtml(post.slug)}</div>
