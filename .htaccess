@@ -1,0 +1,21 @@
+Options -Indexes
+RewriteEngine On
+
+# Keep secrets, schema, logs, and private storage out of the web root.
+<FilesMatch "^(config\.php|config\.example\.php|database\.sql|\.env|.*\.log)$">
+  Require all denied
+</FilesMatch>
+RewriteRule ^(private|storage/private)(/|$) - [F,L]
+
+# The admin console is intentionally available at the requested /admin routes.
+RewriteRule ^admin/assets/(.*)$ public/assets/$1 [L]
+RewriteRule ^admin/api/(.*)$ api/index.php [QSA,L]
+RewriteRule ^admin/?$ index.php [QSA,L]
+
+# JSON API requests are handled by the PHP front controller.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^api/(.*)$ api/index.php [QSA,L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]
