@@ -1,36 +1,152 @@
 <?php
 require __DIR__ . '/lib.php';
+
 $path = trim(parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH), '/');
-$parts = explode('/', $path); $resource = $parts[2] ?? ''; $id = isset($parts[3]) && ctype_digit($parts[3]) ? (int)$parts[3] : null; $action = $parts[3] ?? null;
-$method = $_SERVER['REQUEST_METHOD'];
+$parts = explode('/', $path);
+$resource = $parts[2] ?? '';
+$id = isset($parts[3]) && $parts[3] !== '' ? $parts[3] : null;
+$action = $parts[3] ?? null;
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
 try {
     if ($resource === 'auth') {
-        if ($action === 'csrf' && $method === 'GET') respond(['csrf'=>csrf_token(),'user'=>actor()]);
-        if ($action === 'login' && $method === 'POST') { $in=json_input(); $email=strtolower(trim($in['email']??'')); $approved=allowed_admin($email); if(!$approved) { audit('login_failed','user',null,['email'=>$email]); fail('This email is not authorized for admin access',401); } $userId=null; try { $stmt=db()->prepare('SELECT id,name,is_active FROM users WHERE email=? LIMIT 1'); $stmt->execute([$email]); $u=$stmt->fetch(); if($u && !$u['is_active']) fail('This admin account is disabled',403); if($u) { $userId=(int)$u['id']; } } catch(Throwable $e) { error_log($e->getMessage()); } $_SESSION['admin_user']=['id'=>$userId,'name'=>$approved['name'],'email'=>$email,'role'=>$approved['role']]; if($userId) db()->prepare('UPDATE users SET last_login_at=UTC_TIMESTAMP() WHERE id=?')->execute([$userId]); audit('login','user',$userId); respond(['user'=>$_SESSION['admin_user'],'csrf'=>csrf_token()]); }
-        if ($action === 'logout' && $method === 'POST') { require_auth(); require_csrf(); audit('logout','user',actor()['id']); $_SESSION=[]; session_destroy(); respond(['loggedOut'=>true]); }
-        fail('Not found',404);
+        if ($action === 'csrf' && $method === 'GET') {
+            respond(['csrf' => csrf_token(), 'user' => actor()]);
+        }
+        if ($action === 'login' && $method === 'POST') {
+            $input = json_input();
+            $email = strtolower(trim($input['email'] ?? ''));
+            $approved = allowed_admin($email);
+            if (!$approved) {
+                fail('This email is not authorized for admin access', 401);
+            }
+            $stmt = db()->prepare('SELECT id FROM `User` WHERE email = ? LIMIT 1');
+            $stmt->execute([$email]);
+            $user = $stmt->fetch();
+            $userId = $user['id'] ?? null;
+            $_SESSION['admin_user'] = ['id' => $userId, 'name' => $approved['name'], 'email' => $email, 'role' => $approved['role']];
+            audit('login', 'User', $userId);
+            respond(['user' => $_SESSION['admin_user'], 'csrf' => csrf_token()]);
+        }
+        if ($action === 'logout' && $method === 'POST') {
+            require_auth();
+            require_csrf();
+            $_SESSION = [];
+            session_destroy();
+            respond(['loggedOut' => true]);
+        }
+        fail('Endpoint not found', 404);
     }
-    if ($resource === 'health' && $method==='GET') { try { db()->query('SELECT 1'); respond(['database'=>'ok','php'=>PHP_VERSION,'time'=>gmdate('c')]); } catch(Throwable $e) { respond(['database'=>'degraded','time'=>gmdate('c')],200); } }
-    $user=require_auth();
-    if ($resource === 'dashboard' && $method==='GET') {
-        $out=['bookingsToday'=>0,'revenue30'=>0,'unassignedPickups'=>0,'pendingPartners'=>0,'failedPayments'=>0,'categoryCounts'=>[],'recentOrders'=>[],'trend'=>[],'degraded'=>[]];
-        $queries=['bookingsToday'=>"SELECT COUNT(*) FROM bookings WHERE DATE(created_at)=UTC_DATE()",'revenue30'=>"SELECT COALESCE(SUM(total_price),0) FROM bookings WHERE created_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY AND status <> 'CANCELLED'",'unassignedPickups'=>"SELECT COUNT(*) FROM pickup_requests WHERE status='UNASSIGNED'",'pendingPartners'=>"SELECT COUNT(*) FROM partners WHERE verification_status='PENDING'",'failedPayments'=>"SELECT COUNT(*) FROM payments WHERE status='FAILED' AND created_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY"];
-        foreach($queries as $key=>$sql) { try { $out[$key]=(float)db()->query($sql)->fetchColumn(); } catch(Throwable $e) { $out['degraded'][]=$key; } }
-        try {$out['categoryCounts']=db()->query("SELECT category,COUNT(*) count FROM bookings WHERE created_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY GROUP BY category")->fetchAll();} catch(Throwable $e){$out['degraded'][]='categoryCounts';}
-        try {$out['recentOrders']=db()->query("SELECT t.id,t.reference,t.status,t.created_at,COALESCE(SUM(b.total_price),0) amount,COALESCE(MAX(b.guest_name),'Guest') guest,COUNT(b.id) booking_count,COALESCE(p.status,'CREATED') payment_status FROM trips t LEFT JOIN bookings b ON b.trip_id=t.id LEFT JOIN payments p ON p.trip_id=t.id GROUP BY t.id ORDER BY t.created_at DESC LIMIT 8")->fetchAll();} catch(Throwable $e){$out['degraded'][]='recentOrders';}
-        respond($out);
+
+    if ($resource === 'health' && $method === 'GET') {
+        try {
+            db()->query('SELECT 1');
+            respond(['database' => 'ok', 'php' => PHP_VERSION, 'time' => gmdate('c')]);
+        } catch (Throwable $error) {
+            error_log($error->getMessage());
+            respond(['database' => 'degraded', 'time' => gmdate('c')]);
+        }
     }
-    if ($resource === 'settings') {
-        if ($method==='GET') respond(db()->query('SELECT `key`,typed_value,updated_at FROM settings ORDER BY `key`')->fetchAll());
-        require_csrf(); require_auth(['OWNER','ADMIN']); $in=json_input(); $pdo=db(); $pdo->beginTransaction(); foreach($in as $key=>$value) { if(!preg_match('/^[a-z0-9_]+$/',$key)) continue; $s=$pdo->prepare('INSERT INTO settings (`key`,typed_value,updated_by) VALUES(?,?,?) ON DUPLICATE KEY UPDATE typed_value=VALUES(typed_value),updated_by=VALUES(updated_by),updated_at=UTC_TIMESTAMP()'); $s->execute([$key,is_scalar($value)?(string)$value:json_encode($value),$user['id']]); } $pdo->commit(); audit('edit','settings',null,['keys'=>array_keys($in)]); respond(['saved'=>true]);
+
+    require_auth();
+
+    if ($resource === 'dashboard' && $method === 'GET') {
+        $result = ['bookingsToday' => 0, 'revenue30' => 0, 'unassignedPickups' => 0, 'pendingPartners' => 0, 'failedPayments' => 0, 'categoryCounts' => [], 'recentOrders' => [], 'degraded' => []];
+        $queries = [
+            'bookingsToday' => "SELECT COUNT(*) FROM `Booking` WHERE DATE(createdAt) = UTC_DATE()",
+            'revenue30' => "SELECT COALESCE(SUM(totalPrice), 0) FROM `Booking` WHERE createdAt >= UTC_TIMESTAMP() - INTERVAL 30 DAY AND status <> 'CANCELLED'",
+            'unassignedPickups' => "SELECT COUNT(*) FROM `PickupRequest` WHERE status = 'UNASSIGNED'",
+            'pendingPartners' => "SELECT COUNT(*) FROM `Partner` WHERE verificationStatus = 'PENDING'",
+            'failedPayments' => "SELECT COUNT(*) FROM `Payment` WHERE status = 'FAILED' AND createdAt >= UTC_TIMESTAMP() - INTERVAL 30 DAY",
+        ];
+        foreach ($queries as $key => $query) {
+            try { $result[$key] = (float) db()->query($query)->fetchColumn(); }
+            catch (Throwable $error) { error_log($error->getMessage()); $result['degraded'][] = $key; }
+        }
+        try {
+            $result['categoryCounts'] = db()->query("SELECT category, COUNT(*) AS count FROM `Booking` WHERE createdAt >= UTC_TIMESTAMP() - INTERVAL 30 DAY GROUP BY category")->fetchAll();
+        } catch (Throwable $error) { $result['degraded'][] = 'categoryCounts'; }
+        try {
+            $result['recentOrders'] = db()->query("SELECT t.id, t.reference, t.status, t.createdAt AS created_at, COALESCE(SUM(b.totalPrice), 0) AS amount, COALESCE(MAX(b.guestName), 'Guest') AS guest, COUNT(b.id) AS booking_count, COALESCE(MAX(p.status), 'CREATED') AS payment_status FROM `Trip` t LEFT JOIN `Booking` b ON b.tripId = t.id LEFT JOIN `Payment` p ON p.tripId = t.id GROUP BY t.id, t.reference, t.status, t.createdAt ORDER BY t.createdAt DESC LIMIT 8")->fetchAll();
+        } catch (Throwable $error) { $result['degraded'][] = 'recentOrders'; }
+        respond($result);
     }
+
     if ($resource === 'listings') {
-        if ($method==='GET') { $where=['1=1']; $params=[]; if(!empty($_GET['search'])){$where[]='(l.title LIKE ? OR l.location LIKE ? OR p.business_name LIKE ?)';$q='%'.clean_text($_GET['search'],100).'%';$params=[$q,$q,$q];} if(!empty($_GET['category'])){$where[]='l.category=?';$params[]=$_GET['category'];} if(!empty($_GET['status'])){$where[]='l.status=?';$params[]=$_GET['status'];} $w=implode(' AND ',$where); paged("SELECT l.*,p.business_name partner_name FROM listings l LEFT JOIN partners p ON p.id=l.partner_id WHERE $w ORDER BY l.created_at DESC",$params,"SELECT COUNT(*) FROM listings l LEFT JOIN partners p ON p.id=l.partner_id WHERE $w",$params); }
-        require_csrf(); if($method==='DELETE' && $id){ $s=db()->prepare('SELECT COUNT(*) FROM bookings WHERE listing_id=?');$s->execute([$id]);if($s->fetchColumn()>0)fail('Listing has bookings and cannot be deleted',409);db()->prepare('DELETE FROM listings WHERE id=?')->execute([$id]);audit('delete','listing',$id);respond(['deleted'=>true]); }
-        if(in_array($method,['POST','PATCH'],true)){ $in=json_input(); $errors=[]; foreach(['title','category','location'] as $field) if(empty($in[$field]))$errors[$field]='Required'; $base=(float)($in['base_price']??0);$sell=(float)($in['sell_price']??0);if($base<0||$sell<0||$sell<$base)$errors['sell_price']='Selling price must be >= base price';if($errors)fail('Please fix the highlighted fields',422,$errors);$values=[clean_text($in['slug']??preg_replace('/[^a-z0-9]+/i','-',strtolower($in['title']))),clean_text($in['title'],190),clean_text($in['description']??'',5000),clean_text($in['location'],120),$in['category'],$base,$sell,$in['status']??'DRAFT',json_encode($in['amenities']??[])];if($method==='POST'){$s=db()->prepare('INSERT INTO listings (slug,title,description,location,category,base_price,sell_price,status,amenities) VALUES(?,?,?,?,?,?,?,?,?)');$s->execute($values);$id=db()->lastInsertId();}else{$values[]=$id;$s=db()->prepare('UPDATE listings SET slug=?,title=?,description=?,location=?,category=?,base_price=?,sell_price=?,status=?,amenities=? WHERE id=?');$s->execute($values);}audit($method==='POST'?'create':'edit','listing',$id);respond(['id'=>(int)$id]);}
+        if ($method === 'GET') {
+            $where = ['1 = 1']; $params = [];
+            if (!empty($_GET['search'])) { $where[] = '(l.title LIKE ? OR l.location LIKE ? OR p.businessName LIKE ?)'; $query = '%' . clean_text($_GET['search'], 100) . '%'; $params = [$query, $query, $query]; }
+            if (!empty($_GET['category'])) { $where[] = 'l.category = ?'; $params[] = $_GET['category']; }
+            if (!empty($_GET['status'])) { $where[] = 'l.status = ?'; $params[] = $_GET['status']; }
+            $condition = implode(' AND ', $where);
+            paged("SELECT l.id, l.slug, l.title, l.description, l.location, l.category, l.basePrice AS base_price, l.sellPrice AS sell_price, l.status, l.createdAt AS created_at, l.images, l.amenities, p.businessName AS partner_name FROM `Listing` l LEFT JOIN `Partner` p ON p.id = l.partnerId WHERE $condition ORDER BY l.createdAt DESC", $params, "SELECT COUNT(*) FROM `Listing` l LEFT JOIN `Partner` p ON p.id = l.partnerId WHERE $condition", $params);
+        }
+        require_csrf();
+        if ($method === 'DELETE' && $id) {
+            $check = db()->prepare('SELECT COUNT(*) FROM `Booking` WHERE listingId = ?'); $check->execute([$id]);
+            if ((int) $check->fetchColumn() > 0) fail('Listing has bookings and cannot be deleted', 409);
+            db()->prepare('DELETE FROM `Listing` WHERE id = ?')->execute([$id]); respond(['deleted' => true]);
+        }
+        if (in_array($method, ['POST', 'PATCH'], true)) {
+            $input = json_input(); $errors = [];
+            foreach (['title', 'category', 'location'] as $field) if (empty($input[$field])) $errors[$field] = 'Required';
+            $base = (float) ($input['base_price'] ?? $input['basePrice'] ?? 0); $sell = (float) ($input['sell_price'] ?? $input['sellPrice'] ?? 0);
+            if ($base < 0 || $sell < $base) $errors['sell_price'] = 'Selling price must be greater than or equal to base price';
+            if ($errors) fail('Please fix the highlighted fields', 422, $errors);
+            $slug = clean_text($input['slug'] ?? preg_replace('/[^a-z0-9]+/i', '-', strtolower($input['title'])), 191);
+            $images = json_encode($input['images'] ?? []); $amenities = json_encode($input['amenities'] ?? []);
+            if ($method === 'POST') {
+                $newId = bin2hex(random_bytes(12));
+                $stmt = db()->prepare('INSERT INTO `Listing` (id, slug, partnerId, category, title, description, location, basePrice, sellPrice, images, amenities, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                $stmt->execute([$newId, $slug, $input['partnerId'] ?? '', $input['category'], clean_text($input['title'], 191), clean_text($input['description'] ?? '', 191), clean_text($input['location'], 191), $base, $sell, $images, $amenities, $input['status'] ?? 'DRAFT']);
+                respond(['id' => $newId]);
+            }
+            $stmt = db()->prepare('UPDATE `Listing` SET slug=?, title=?, description=?, location=?, category=?, basePrice=?, sellPrice=?, status=?, images=?, amenities=? WHERE id=?');
+            $stmt->execute([$slug, clean_text($input['title'], 191), clean_text($input['description'] ?? '', 191), clean_text($input['location'], 191), $input['category'], $base, $sell, $input['status'] ?? 'DRAFT', $images, $amenities, $id]);
+            respond(['id' => $id]);
+        }
     }
-    $simpleMap=['customers'=>['table'=>'users','label'=>'customer','where'=>"role='CUSTOMER'"],'users'=>['table'=>'users','label'=>'user','where'=>"role IN ('OWNER','ADMIN','STAFF')"],'partners'=>['table'=>'partners','label'=>'partner','where'=>'1=1'],'vehicles'=>['table'=>'vehicles','label'=>'vehicle','where'=>'1=1'],'pickups'=>['table'=>'pickup_requests','label'=>'pickup','where'=>'1=1'],'media'=>['table'=>'media_assets','label'=>'media','where'=>'1=1'],'packages'=>['table'=>'packages','label'=>'package','where'=>'1=1'],'blog'=>['table'=>'blog_posts','label'=>'blog_post','where'=>'1=1']];
-    if(isset($simpleMap[$resource])) { $m=$simpleMap[$resource]; if($method==='GET'){ $search=clean_text($_GET['search']??'',100);$where=$m['where'];$params=[];if($search && $resource==='users'){$where.=' AND (name LIKE ? OR email LIKE ?)';$params=["%$search%","%$search%"]; } if($search && $resource==='partners'){$where.=' AND business_name LIKE ?';$params=["%$search%"]; } paged("SELECT * FROM {$m['table']} WHERE $where ORDER BY created_at DESC",$params,"SELECT COUNT(*) FROM {$m['table']} WHERE $where",$params); } require_csrf(); require_auth(['OWNER','ADMIN']); if($method==='DELETE'&&$id){db()->prepare("DELETE FROM {$m['table']} WHERE id=?")->execute([$id]);audit('delete',$m['label'],$id);respond(['deleted'=>true]);} if(in_array($method,['POST','PATCH'],true)){ $in=json_input(); if($resource==='users'&&$method==='POST'){if(empty($in['email'])||empty($in['name'])||empty($in['password']))fail('Name, email, and password are required',422);$s=db()->prepare('INSERT INTO users(name,email,password_hash,role,is_active) VALUES(?,?,?,?,?)');$s->execute([clean_text($in['name'],120),strtolower(trim($in['email'])),password_hash($in['password'],PASSWORD_DEFAULT),$in['role']??'STAFF',1]);$id=db()->lastInsertId();} elseif($resource==='partners'&&$method==='POST'){ $s=db()->prepare('INSERT INTO partners(business_name,category,verification_status) VALUES(?,?,?)');$s->execute([clean_text($in['business_name'],190),$in['category']??'STAY',$in['verification_status']??'PENDING']);$id=db()->lastInsertId();} else {fail('This resource supports read and delete in the starter workflow',405);} audit('create',$m['label'],$id);respond(['id'=>(int)$id]); } }
-    if ($resource === 'orders' && $method==='GET') { $where='1=1';$params=[];if(!empty($_GET['search'])){$where.=' AND (t.reference LIKE ? OR b.guest_name LIKE ? OR b.guest_email LIKE ? OR b.guest_phone LIKE ?)';$q='%'.clean_text($_GET['search'],100).'%';$params=[$q,$q,$q,$q];}if(!empty($_GET['status'])){$where.=' AND t.status=?';$params[]=$_GET['status'];}paged("SELECT t.*,COALESCE(MAX(b.guest_name),'Guest') guest,COALESCE(SUM(b.total_price),0) amount,COUNT(b.id) booking_count FROM trips t LEFT JOIN bookings b ON b.trip_id=t.id WHERE $where GROUP BY t.id ORDER BY t.created_at DESC",$params,"SELECT COUNT(DISTINCT t.id) FROM trips t LEFT JOIN bookings b ON b.trip_id=t.id WHERE $where",$params); }
-    fail('Endpoint not found',404);
-} catch(PDOException $e) { error_log($e->getMessage()); fail('A database operation failed',500); } catch(Throwable $e) { error_log($e->getMessage()); fail('Unexpected server error',500); }
+
+    if ($resource === 'orders' && $method === 'GET') {
+        $where = ['1 = 1']; $params = [];
+        if (!empty($_GET['search'])) { $where[] = '(t.reference LIKE ? OR b.guestName LIKE ? OR b.guestEmail LIKE ? OR b.guestPhone LIKE ?)'; $query = '%' . clean_text($_GET['search'], 100) . '%'; $params = [$query, $query, $query, $query]; }
+        if (!empty($_GET['status'])) { $where[] = 't.status = ?'; $params[] = $_GET['status']; }
+        $condition = implode(' AND ', $where);
+        paged("SELECT t.id, t.reference, t.status, t.createdAt AS created_at, COALESCE(MAX(b.guestName), 'Guest') AS guest, COALESCE(SUM(b.totalPrice), 0) AS amount, COUNT(b.id) AS booking_count FROM `Trip` t LEFT JOIN `Booking` b ON b.tripId = t.id WHERE $condition GROUP BY t.id, t.reference, t.status, t.createdAt ORDER BY t.createdAt DESC", $params, "SELECT COUNT(DISTINCT t.id) FROM `Trip` t LEFT JOIN `Booking` b ON b.tripId = t.id WHERE $condition", $params);
+    }
+
+    if ($resource === 'orders' && $id && $action === 'status' && in_array($method, ['POST', 'PATCH'], true)) {
+        require_csrf(); $next = json_input()['status'] ?? '';
+        $allowed = ['PENDING' => ['CONFIRMED', 'CANCELLED'], 'CONFIRMED' => ['COMPLETED', 'CANCELLED'], 'COMPLETED' => [], 'CANCELLED' => []];
+        $stmt = db()->prepare('SELECT status FROM `Trip` WHERE id = ?'); $stmt->execute([$id]); $current = $stmt->fetchColumn();
+        if (!$current) fail('Order not found', 404); if (!in_array($next, $allowed[$current] ?? [], true)) fail('Invalid order status transition', 409);
+        db()->prepare("UPDATE `Trip` SET status = ?, confirmedAt = IF(? = 'CONFIRMED', UTC_TIMESTAMP(3), confirmedAt) WHERE id = ?")->execute([$next, $next, $id]);
+        respond(['id' => $id, 'status' => $next]);
+    }
+
+    $resources = [
+        'customers' => ['table' => 'User', 'where' => "role = 'CUSTOMER'", 'search' => '(name LIKE ? OR email LIKE ? OR phone LIKE ?)'],
+        'users' => ['table' => 'User', 'where' => "role IN ('OWNER','ADMIN','STAFF')", 'search' => '(name LIKE ? OR email LIKE ?)'],
+        'partners' => ['table' => 'Partner', 'where' => '1 = 1', 'search' => 'businessName LIKE ?'],
+        'vehicles' => ['table' => 'Vehicle', 'where' => '1 = 1', 'search' => '(type LIKE ? OR registrationNumber LIKE ? OR driverName LIKE ?)'],
+        'pickups' => ['table' => 'PickupRequest', 'where' => '1 = 1', 'search' => '(pickupLocationText LIKE ? OR dropoffLocationText LIKE ?)'],
+        'packages' => ['table' => 'Package', 'where' => '1 = 1', 'search' => 'title LIKE ?'],
+        'blog' => ['table' => 'BlogPost', 'where' => '1 = 1', 'search' => '(title LIKE ? OR slug LIKE ? OR authorName LIKE ?)'],
+    ];
+    if (isset($resources[$resource])) {
+        $definition = $resources[$resource];
+        if ($method === 'GET') {
+            $where = [$definition['where']]; $params = [];
+            if (!empty($_GET['search'])) { $search = '%' . clean_text($_GET['search'], 100) . '%'; $where[] = $definition['search']; $params = array_fill(0, substr_count($definition['search'], '?'), $search); }
+            $condition = implode(' AND ', $where); $table = '`' . $definition['table'] . '`';
+            paged("SELECT * FROM $table WHERE $condition ORDER BY createdAt DESC", $params, "SELECT COUNT(*) FROM $table WHERE $condition", $params);
+        }
+        fail('This resource is read-only until its edit contract is enabled', 405);
+    }
+
+    fail('Endpoint not found', 404);
+} catch (PDOException $error) {
+    error_log($error->getMessage()); fail('A database operation failed', 500);
+} catch (Throwable $error) {
+    error_log($error->getMessage()); fail('Unexpected server error', 500);
+}
