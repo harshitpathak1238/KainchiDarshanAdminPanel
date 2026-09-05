@@ -143,17 +143,34 @@ try {
     }
 
     if ($resource === 'settings' && $method === 'GET') {
-        respond([
-            ['key' => 'business_name', 'typed_value' => 'Pahadi Stay'],
-            ['key' => 'commission_percent', 'typed_value' => '12'],
-            ['key' => 'timezone', 'typed_value' => $config['app']['timezone'] ?? 'Asia/Kolkata'],
-            ['key' => 'currency', 'typed_value' => 'INR'],
-        ], 200, ['persistent' => false, 'message' => 'Settings storage needs an admin settings table migration.']);
+        try {
+            $settings = db()->query('SELECT `key`, typedValue AS typed_value, updatedAt AS updated_at FROM `AdminSetting` ORDER BY `key`')->fetchAll();
+            respond($settings, 200, ['persistent' => true]);
+        } catch (Throwable $error) {
+            respond([
+                ['key' => 'business_name', 'typed_value' => 'Pahadi Stay'],
+                ['key' => 'commission_percent', 'typed_value' => '12'],
+                ['key' => 'timezone', 'typed_value' => $config['app']['timezone'] ?? 'Asia/Kolkata'],
+                ['key' => 'currency', 'typed_value' => 'INR'],
+            ], 200, ['persistent' => false, 'message' => 'Import admin_migration.sql to enable persistent settings.']);
+        }
     }
 
     if ($resource === 'settings' && in_array($method, ['POST', 'PATCH'], true)) {
         require_csrf();
-        fail('Settings are read-only until the admin settings migration is applied', 409);
+        require_auth(['OWNER', 'ADMIN']);
+        $input = json_input();
+        try {
+            $stmt = db()->prepare('INSERT INTO `AdminSetting` (`key`, typedValue, updatedBy) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE typedValue = VALUES(typedValue), updatedBy = VALUES(updatedBy), updatedAt = UTC_TIMESTAMP(3)');
+            foreach ($input as $key => $value) {
+                if (!preg_match('/^[a-z0-9_]+$/', $key)) continue;
+                $stmt->execute([$key, is_scalar($value) ? (string) $value : json_encode($value), actor()['id'] ?? null]);
+            }
+            audit('edit', 'AdminSetting', null, ['keys' => array_keys($input)]);
+            respond(['saved' => true]);
+        } catch (Throwable $error) {
+            fail('Settings were not saved. Import admin_migration.sql first.', 409);
+        }
     }
 
     $resources = [
