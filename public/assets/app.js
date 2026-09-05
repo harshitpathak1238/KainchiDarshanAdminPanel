@@ -1,4 +1,4 @@
-const app = document.querySelector('#app');
+﻿const app = document.querySelector('#app');
 const apiBase = location.pathname.startsWith('/admin') ? './api/' : 'api/';
 const state = { csrf: '', user: null, route: 'dashboard', page: 1, perPage: 20, filter: '' };
 
@@ -49,7 +49,7 @@ function renderLogin(error = '') {
 }
 
 function renderShell() {
-  app.innerHTML = `<aside class="sidebar" id="sidebar"><div class="sidebar-header"><div class="brand"><span class="mark">K</span><span>Operations</span></div></div><nav class="nav">${navGroups.map(group => `<div class="nav-section">${group.label}</div>${group.items.map(([key, icon, label]) => `<button data-route="${key}"><span class="nav-icon">${icon}</span>${label}</button>`).join('')}`).join('')}</nav><div class="sidebar-footer"><button class="nav" style="border:0;background:transparent;color:#6d7175;width:100%;text-align:left" onclick="window.open('/', '_blank')">↗ View website</button></div></aside>
+  app.innerHTML = `<aside class="sidebar" id="sidebar"><div class="sidebar-header"><div class="brand-stack"><div class="brand"><span class="mark">K</span><span class="brand-name">Operations</span></div><div class="brand-sub">Admin</div></div></div><nav class="nav">${navGroups.map(group => `<div class="nav-section">${group.label}</div>${group.items.map(([key, icon, label]) => `<button data-route="${key}"><span class="nav-icon">${icon}</span>${label}</button>`).join('')}`).join('')}</nav><div class="sidebar-footer"><button class="nav" style="border:0;background:transparent;color:#6d7175;width:100%;text-align:left" onclick="window.open('/', '_blank')">↗ View website</button></div></aside>
   <div class="main"><header class="topbar"><button class="mobile-menu" id="mobile-menu" aria-label="Open navigation">☰</button><div class="topbar-title"><small>Pahadi Stay</small>Admin</div><div class="account"><span class="role">${escapeHtml(state.user.name)} · ${escapeHtml(state.user.role)}</span><span class="avatar">${escapeHtml(state.user.name.slice(0, 1).toUpperCase())}</span><button class="btn secondary" id="sign-out">Sign out</button></div></header><main class="content" id="content"></main></div>`;
   document.querySelectorAll('[data-route]').forEach(button => button.onclick = () => navigate(button.dataset.route));
   document.querySelector('#mobile-menu').onclick = () => document.querySelector('#sidebar').classList.toggle('open');
@@ -132,27 +132,145 @@ async function loadResource(resource) {
 }
 
 async function blogPage() {
-  const content = document.querySelector('#content'); content.innerHTML = pageHeading('Content', 'Blog', 'Manage stories, search previews, and scheduled publishing.', '<button class="btn" onclick="blogForm()">Add new post</button>') + `<section class="panel"><div class="toolbar"><input id="resource-search" placeholder="Search posts"><select id="blog-status"><option value="">All statuses</option><option>DRAFT</option><option>SCHEDULED</option><option>PUBLISHED</option><option>ARCHIVED</option></select><select id="blog-sort"><option>Newest first</option><option>Oldest first</option></select></div><div id="resource-table">${skeleton()}</div></section>`; document.querySelector('#resource-search').oninput = debounce(loadBlog); document.querySelector('#blog-status').onchange = loadBlog; loadBlog();
-}
-async function loadBlog() { try { const posts = await api(`blog?search=${encodeURIComponent(document.querySelector('#resource-search')?.value || '')}`); document.querySelector('#resource-table').innerHTML = table(['Post', 'Author', 'Status', 'Publish date', ''], posts.map(post => [`<span class="row-title">${escapeHtml(post.title)}</span><div class="row-meta">/${escapeHtml(post.slug)}</div>`, escapeHtml(post.authorName), badge(post.status), date(post.publishedAt || post.scheduledAt || post.createdAt), `<button class="btn secondary" onclick="blogForm('${post.id}')">Edit</button>`])); } catch (error) { document.querySelector('#resource-table').innerHTML = `<div class="empty">Blog request failed: ${escapeHtml(error.message)}</div>`; } }
-function blogForm(id = '') {
   const content = document.querySelector('#content');
-  content.innerHTML = `<div class="detail-back"><button onclick="blogPage()">← Posts</button> / Blog editor</div><div class="page-heading"><div><p class="eyebrow">Content</p><h1>${id ? 'Edit post' : 'New post'}</h1></div><div class="actions"><button class="btn secondary" onclick="toast('Preview will open once the post is saved.')">Preview</button><button class="btn" onclick="toast('Blog save endpoint is not enabled yet.')">▣ Save</button></div></div><form id="blog-editor" class="panel"><div class="panel-body"><div class="form-grid"><div class="field span-2"><label>Title</label><input name="title" required placeholder="Give your story a clear title"></div><div class="field span-2"><label>URL slug / handle</label><input name="slug" placeholder="your-post-slug"></div><div class="field span-2"><label>Body HTML</label><div class="toolbar"><button type="button" class="btn secondary">B</button><button type="button" class="btn secondary"><i>I</i></button><button type="button" class="btn secondary">• List</button><button type="button" class="btn secondary">H2</button><button type="button" class="btn secondary">&lt;/&gt;</button></div><textarea name="body" rows="18" placeholder="Write the article or switch to raw HTML."></textarea></div><div class="field span-2"><label>Excerpt / summary</label><textarea name="excerpt" rows="3"></textarea></div></div></div><aside class="panel-body" style="border-top:1px solid var(--line)"><div class="form-grid"><div class="field"><label>Category</label><input name="category"></div><div class="field"><label>Primary keyword</label><input name="primaryKeyword"></div><div class="field"><label>Tags</label><input name="tags" placeholder="Comma separated"></div><div class="field"><label>Status</label><select name="status"><option>DRAFT</option><option>SCHEDULED</option><option>PUBLISHED</option><option>ARCHIVED</option></select></div><div class="field"><label>SEO title</label><input name="metaTitle"></div><div class="field"><label>Author</label><select name="authorName"><option>${escapeHtml(state.user.name)}</option></select></div><div class="field span-2"><label>SEO meta description</label><textarea name="metaDescription" rows="3"></textarea></div></div></aside><div class="save-bar hidden" id="blog-save"><span>Unsaved changes</span><div class="actions"><button type="button" class="btn secondary" onclick="blogPage()">Discard</button><button type="button" class="btn" onclick="toast('Blog save endpoint is not enabled yet.')">Save draft</button></div></div></form>`;
+  content.innerHTML = pageHeading('Content', 'Blog', 'Manage stories, search previews, and scheduled publishing.', '<button class="btn" onclick="blogForm()">Add new post</button>') + `<section class="panel"><div class="toolbar"><input id="resource-search" placeholder="Search posts"><select id="blog-status"><option value="">All statuses</option><option>DRAFT</option><option>SCHEDULED</option><option>PUBLISHED</option><option>ARCHIVED</option></select><select id="blog-sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></div><div id="resource-table">${skeleton()}</div></section>`;
+  document.querySelector('#resource-search').oninput = debounce(loadBlog);
+  document.querySelector('#blog-status').onchange = loadBlog;
+  document.querySelector('#blog-sort').onchange = loadBlog;
+  loadBlog();
+}
+
+async function loadBlog() {
+  try {
+    const search = document.querySelector('#resource-search')?.value || '';
+    const status = document.querySelector('#blog-status')?.value || '';
+    const sort = document.querySelector('#blog-sort')?.value || 'newest';
+    const posts = await api(`blog?search=${encodeURIComponent(search)}`);
+    const filtered = (Array.isArray(posts) ? posts : []).filter(post => !status || (post.status || '') === status);
+    filtered.sort((a, b) => {
+      const left = new Date(a.publishedAt || a.scheduledAt || a.createdAt || 0).getTime();
+      const right = new Date(b.publishedAt || b.scheduledAt || b.createdAt || 0).getTime();
+      return sort === 'oldest' ? left - right : right - left;
+    });
+    document.querySelector('#resource-table').innerHTML = table(['Post', 'Author', 'Status', 'Publish date', ''], filtered.map(post => [`<span class="row-title">${escapeHtml(post.title)}</span><div class="row-meta">/${escapeHtml(post.slug)}</div>`, escapeHtml(post.authorName), badge(post.status), date(post.publishedAt || post.scheduledAt || post.createdAt), `<button class="btn secondary" onclick="blogForm('${post.id}')">Edit</button>`]));
+  } catch (error) {
+    document.querySelector('#resource-table').innerHTML = `<div class="empty">Blog request failed: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function blogEditorInsertFormat(command) {
+  const textarea = document.querySelector('#blog-body');
+  if (!textarea) return;
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const selected = textarea.value.slice(start, end) || 'text';
+  let insert = selected;
+  if (command === 'bold') insert = `**${selected}**`;
+  if (command === 'italic') insert = `*${selected}*`;
+  if (command === 'heading') insert = `\n\n## ${selected}\n`;
+  if (command === 'list') insert = `\n- ${selected}\n`;
+  if (command === 'code') insert = `\n\n\`\`${selected}\`\`\n`;
+  textarea.setRangeText(insert, start, end, 'end');
+  textarea.focus();
+}
+
+async function blogForm(id = '') {
+  const content = document.querySelector('#content');
+  const authorName = state.user?.name || 'Admin';
+  content.innerHTML = `<div class="detail-back"><button onclick="blogPage()">← Posts</button> / Blog editor</div><div class="page-heading"><div><p class="eyebrow">Content</p><h1>${id ? 'Edit post' : 'New post'}</h1></div><div class="actions"><button class="btn secondary" id="blog-preview-btn" type="button">Preview</button><button class="btn" id="blog-save-btn" type="button">Save</button></div></div><div id="blog-save-banner" class="blog-success-banner hidden">Blog saved.</div><form id="blog-editor" class="blog-editor-layout"><div class="blog-main panel"><div class="field blog-field"><label>Title</label><input name="title" class="blog-text-input" required placeholder="Give your story a clear title"></div><div class="field blog-field"><label>URL slug / handle</label><input name="slug" class="blog-text-input" placeholder="your-post-slug"></div><div class="field blog-field"><label>Body HTML</label><div class="editor-toolbar"><button type="button" class="editor-format-btn" data-format="bold">B</button><button type="button" class="editor-format-btn" data-format="italic"><i>I</i></button><button type="button" class="editor-format-btn" data-format="heading">H2</button><button type="button" class="editor-format-btn" data-format="list">• List</button><button type="button" class="editor-format-btn" data-format="code">&lt;/&gt;</button></div><textarea id="blog-body" name="body" rows="18" class="blog-editor-input" placeholder="Write the article or switch to raw HTML."></textarea></div><div class="field blog-field"><label>Excerpt / summary</label><textarea name="excerpt" rows="4" class="blog-editor-input blog-summary-input" placeholder="A short summary for the blog listing and previews."></textarea></div></div><aside class="blog-side-panel panel"><div class="field blog-field"><label>Category</label><input name="category" class="blog-text-input" placeholder="Travel, Guide, Experience..."></div><div class="field blog-field"><label>Primary keyword</label><input name="primaryKeyword" class="blog-text-input" placeholder="Primary keyword"></div><div class="field blog-field"><label>Tags</label><input name="tags" class="blog-text-input" placeholder="Comma separated"></div><div class="field blog-field"><label>SEO title</label><input name="metaTitle" class="blog-text-input" placeholder="SEO title"></div><div class="field blog-field"><label>SEO description</label><textarea name="metaDescription" rows="3" class="blog-editor-input blog-summary-input" placeholder="Short meta description"></textarea></div><div class="field blog-field"><label>Author</label><select name="authorName" class="blog-select"><option value="">Select admin</option><option value="${escapeHtml(authorName)}">${escapeHtml(authorName)}</option></select></div><div class="field blog-field"><label>Status</label><select name="status" class="blog-select"><option value="DRAFT">Draft</option><option value="SCHEDULED">Scheduled</option><option value="PUBLISHED">Published</option><option value="ARCHIVED">Archived</option></select></div><div class="field blog-field"><label>Scheduled publish</label><input name="scheduledAt" class="blog-text-input" type="datetime-local"></div><div class="field blog-field"><label>Featured image</label><div class="featured-image-block"><input type="hidden" name="featuredImage" value=""><button type="button" class="btn secondary" id="featured-image-trigger">Choose File</button><span id="featured-image-name">No file chosen</span><input type="file" id="featured-image-input" accept="image/*" class="hidden"></div></div><div class="field blog-field"><label>Featured image alt text</label><input name="imageAltText" class="blog-text-input" placeholder="Describe the feature image"></div></aside></form>`;
+
   const editor = document.querySelector('#blog-editor');
+  const bodyInput = document.querySelector('#blog-body');
+  const saveBanner = document.querySelector('#blog-save-banner');
+
+  editor.addEventListener('input', () => {
+    saveBanner.classList.add('hidden');
+  });
+
+  document.querySelectorAll('.editor-format-btn').forEach(button => {
+    button.addEventListener('click', () => blogEditorInsertFormat(button.dataset.format));
+  });
+
+  document.querySelector('#featured-image-trigger').addEventListener('click', () => {
+    document.querySelector('#featured-image-input').click();
+  });
+
+  document.querySelector('#featured-image-input').addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch(`${apiBase}media`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': state.csrf },
+        body: formData,
+      });
+      const payload = await response.json().catch(() => ({ error: 'Upload failed.' }));
+      if (!response.ok) throw new Error(payload.error || 'Upload failed.');
+      document.querySelector('input[name="featuredImage"]').value = payload.public_url || '';
+      document.querySelector('#featured-image-name').textContent = file.name;
+      toast('Featured image uploaded successfully.');
+    } catch (error) {
+      toast(`Image upload failed: ${error.message}`);
+    }
+  });
+
   const savePost = async () => {
     if (!editor.reportValidity()) return;
-    const data = Object.fromEntries(new FormData(editor));
+    const formData = new FormData(editor);
+    const data = Object.fromEntries(formData.entries());
+    data.tags = (data.tags || '').split(',').map(item => item.trim()).filter(Boolean);
+    if (!data.status) data.status = 'DRAFT';
+    if (!data.authorName) data.authorName = state.user?.name || 'Admin';
     try {
       await api(`blog${id ? `/${id}` : ''}`, { method: id ? 'PATCH' : 'POST', body: data });
+      saveBanner.classList.remove('hidden');
       toast('Blog post saved successfully.');
-      blogPage();
+      if (!id) blogPage();
     } catch (error) {
       toast(`Blog post save failed: ${error.message}`);
     }
   };
-  editor.oninput = () => document.querySelector('#blog-save').classList.remove('hidden');
-  document.querySelector('#blog-save .btn:not(.secondary)').onclick = savePost;
-  document.querySelector('.page-heading .btn:not(.secondary)').onclick = savePost;
+
+  document.querySelector('#blog-save-btn').addEventListener('click', savePost);
+  document.querySelector('#blog-preview-btn').addEventListener('click', () => {
+    const previewWindow = window.open('', '_blank', 'noopener,noreferrer');
+    const html = `<!doctype html><html><head><title>${escapeHtml(document.querySelector('input[name="title"]').value || 'Untitled post')}</title><style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#1a1a1a;line-height:1.7}h1,h2{font-weight:700}img{max-width:100%;height:auto;border-radius:10px}p{margin:16px 0}</style></head><body>${(bodyInput?.value || '').replace(/\n/g, '<br>')}</body></html>`;
+    previewWindow.document.write(html);
+    previewWindow.document.close();
+  });
+
+  if (id) {
+    try {
+      const posts = await api('blog');
+      const post = (Array.isArray(posts) ? posts : []).find(item => item.id === id);
+      if (!post) return;
+      const form = document.querySelector('#blog-editor');
+      form.querySelector('[name="title"]').value = post.title || '';
+      form.querySelector('[name="slug"]').value = post.slug || '';
+      form.querySelector('[name="body"]').value = post.body || '';
+      form.querySelector('[name="excerpt"]').value = post.excerpt || '';
+      form.querySelector('[name="category"]').value = post.category || '';
+      form.querySelector('[name="primaryKeyword"]').value = post.primaryKeyword || '';
+      form.querySelector('[name="tags"]').value = Array.isArray(post.tags) ? post.tags.join(', ') : (post.tags || '');
+      form.querySelector('[name="metaTitle"]').value = post.metaTitle || '';
+      form.querySelector('[name="metaDescription"]').value = post.metaDescription || '';
+      if (post.authorName) {
+        const authorSelect = form.querySelector('[name="authorName"]');
+        authorSelect.value = post.authorName;
+      }
+      form.querySelector('[name="status"]').value = post.status || 'DRAFT';
+      form.querySelector('[name="scheduledAt"]').value = post.scheduledAt ? post.scheduledAt.replace(' ', 'T').slice(0, 16) : '';
+      form.querySelector('[name="featuredImage"]').value = post.featuredImage || '';
+      form.querySelector('[name="imageAltText"]').value = post.imageAltText || '';
+      if (post.featuredImage) {
+        document.querySelector('#featured-image-name').textContent = 'Image assigned';
+      }
+    } catch (error) {
+      toast(`Unable to load blog post: ${error.message}`);
+    }
+  }
 }
 
 async function mediaPage() { const content = document.querySelector('#content'); content.innerHTML = pageHeading('Content', 'Media Library', 'One home for reusable images and videos.', '<button class="btn" onclick="document.querySelector(\'#media-input\').click()">↥ Upload files</button>') + `<section class="panel"><div class="dropzone" id="dropzone"><strong>Drop images or videos here</strong><br><span class="subtle">JPG, PNG, WebP up to 10 MB · MP4 and MOV up to 100 MB</span><input id="media-input" class="hidden" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime"></div><div id="upload-queue"></div><div class="toolbar"><input id="resource-search" placeholder="Search files"><select><option>All types</option><option>Images</option><option>Videos</option></select><select><option>Newest</option><option>Oldest</option><option>Name A-Z</option><option>Largest</option></select></div><div id="media-grid" class="media-grid">${skeleton(4)}</div></section>`; const input = document.querySelector('#media-input'); input.onchange = event => uploadFiles(event.target.files); const dropzone = document.querySelector('#dropzone'); dropzone.ondragover = event => { event.preventDefault(); dropzone.classList.add('dragging'); }; dropzone.ondragleave = () => dropzone.classList.remove('dragging'); dropzone.ondrop = event => { event.preventDefault(); dropzone.classList.remove('dragging'); uploadFiles(event.dataTransfer.files); }; loadMedia(); }
