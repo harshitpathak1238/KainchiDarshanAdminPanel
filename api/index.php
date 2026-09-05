@@ -124,6 +124,38 @@ try {
         respond(['id' => $id, 'status' => $next]);
     }
 
+    if ($resource === 'media' && $method === 'GET') {
+        global $config;
+        $directory = $config['app']['uploads_dir'] ?? (__DIR__ . '/../storage/uploads');
+        if (!is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+        $files = [];
+        foreach (scandir($directory) ?: [] as $filename) {
+            if ($filename === '.' || $filename === '..' || str_starts_with($filename, '.')) continue;
+            $path = $directory . DIRECTORY_SEPARATOR . $filename;
+            if (!is_file($path)) continue;
+            $mime = function_exists('mime_content_type') ? mime_content_type($path) : 'application/octet-stream';
+            $files[] = ['filename' => $filename, 'public_url' => rtrim($config['app']['uploads_url'] ?? 'storage/uploads', '/') . '/' . rawurlencode($filename), 'mime_type' => $mime, 'size_bytes' => filesize($path), 'alt_text' => '', 'usage_count' => 0, 'created_at' => gmdate('Y-m-d H:i:s', filemtime($path))];
+        }
+        usort($files, static fn(array $left, array $right): int => strcmp($right['created_at'], $left['created_at']));
+        respond($files);
+    }
+
+    if ($resource === 'settings' && $method === 'GET') {
+        respond([
+            ['key' => 'business_name', 'typed_value' => 'Pahadi Stay'],
+            ['key' => 'commission_percent', 'typed_value' => '12'],
+            ['key' => 'timezone', 'typed_value' => $config['app']['timezone'] ?? 'Asia/Kolkata'],
+            ['key' => 'currency', 'typed_value' => 'INR'],
+        ], 200, ['persistent' => false, 'message' => 'Settings storage needs an admin settings table migration.']);
+    }
+
+    if ($resource === 'settings' && in_array($method, ['POST', 'PATCH'], true)) {
+        require_csrf();
+        fail('Settings are read-only until the admin settings migration is applied', 409);
+    }
+
     $resources = [
         'customers' => ['table' => 'User', 'where' => "role = 'CUSTOMER'", 'search' => '(name LIKE ? OR email LIKE ? OR phone LIKE ?)'],
         'users' => ['table' => 'User', 'where' => "role IN ('OWNER','ADMIN','STAFF')", 'search' => '(name LIKE ? OR email LIKE ?)'],
