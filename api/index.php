@@ -199,6 +199,14 @@ try {
         }
     }
 
+    if ($resource === 'blog' && $method === 'DELETE' && $id) {
+        require_csrf();
+        require_auth(['OWNER', 'ADMIN', 'STAFF']);
+        db()->prepare('DELETE FROM `BlogPost` WHERE id = ?')->execute([$id]);
+        audit('delete', 'BlogPost', $id);
+        respond(['deleted' => true]);
+    }
+
     if ($resource === 'blog' && in_array($method, ['POST', 'PATCH'], true)) {
         require_csrf();
         require_auth(['OWNER', 'ADMIN', 'STAFF']);

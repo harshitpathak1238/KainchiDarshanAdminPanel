@@ -133,10 +133,25 @@ async function loadResource(resource) {
 
 async function blogPage() {
   const content = document.querySelector('#content');
-  content.innerHTML = pageHeading('Content', 'Blog', 'Manage stories, search previews, and scheduled publishing.', '<button class="btn" onclick="blogForm()">Add new post</button>') + `<section class="panel"><div class="toolbar"><input id="resource-search" placeholder="Search posts"><select id="blog-status"><option value="">All statuses</option><option>DRAFT</option><option>SCHEDULED</option><option>PUBLISHED</option><option>ARCHIVED</option></select><select id="blog-sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></div><div id="resource-table">${skeleton()}</div></section>`;
+  const toolbar = `
+    <div class="blog-toolbar">
+      <div class="blog-toolbar-actions">
+        <button class="btn btn-primary" onclick="blogForm()">Add new</button>
+      </div>
+      <div class="blog-toolbar-filters">
+        <input id="resource-search" placeholder="Search posts">
+        <select id="blog-status">
+          <option value="">All statuses</option>
+          <option>DRAFT</option>
+          <option>SCHEDULED</option>
+          <option>PUBLISHED</option>
+          <option>ARCHIVED</option>
+        </select>
+      </div>
+    </div>`;
+  content.innerHTML = pageHeading('Content', 'Blog', 'Manage stories, search previews, and scheduled publishing.') + `<section class="panel blog-list-panel">${toolbar}<div id="resource-table">${skeleton()}</div></section>`;
   document.querySelector('#resource-search').oninput = debounce(loadBlog);
   document.querySelector('#blog-status').onchange = loadBlog;
-  document.querySelector('#blog-sort').onchange = loadBlog;
   loadBlog();
 }
 
@@ -144,17 +159,51 @@ async function loadBlog() {
   try {
     const search = document.querySelector('#resource-search')?.value || '';
     const status = document.querySelector('#blog-status')?.value || '';
-    const sort = document.querySelector('#blog-sort')?.value || 'newest';
     const posts = await api(`blog?search=${encodeURIComponent(search)}`);
     const filtered = (Array.isArray(posts) ? posts : []).filter(post => !status || (post.status || '') === status);
-    filtered.sort((a, b) => {
-      const left = new Date(a.publishedAt || a.scheduledAt || a.createdAt || 0).getTime();
-      const right = new Date(b.publishedAt || b.scheduledAt || b.createdAt || 0).getTime();
-      return sort === 'oldest' ? left - right : right - left;
-    });
-    document.querySelector('#resource-table').innerHTML = table(['Post', 'Author', 'Status', 'Publish date', ''], filtered.map(post => [`<span class="row-title">${escapeHtml(post.title)}</span><div class="row-meta">/${escapeHtml(post.slug)}</div>`, escapeHtml(post.authorName), badge(post.status), date(post.publishedAt || post.scheduledAt || post.createdAt), `<button class="btn secondary" onclick="blogForm('${post.id}')">Edit</button>`]));
+    filtered.sort((a, b) => new Date(b.publishedAt || b.scheduledAt || b.createdAt || 0) - new Date(a.publishedAt || a.scheduledAt || a.createdAt || 0));
+
+    document.querySelector('#resource-table').innerHTML = `
+      <div class="blog-table-header">
+        <div class="blog-col post-col">POST</div>
+        <div class="blog-col author-col">AUTHOR</div>
+        <div class="blog-col status-col">STATUS</div>
+        <div class="blog-col date-col">PUBLISH DATE</div>
+        <div class="blog-col action-col"></div>
+      </div>
+      ${filtered.length ? filtered.map(post => `
+        <div class="blog-row">
+          <div class="blog-col post-col">
+            <div class="blog-post-main">
+              <div class="blog-post-icon">✎</div>
+              <div class="blog-post-copy">
+                <div class="blog-title">${escapeHtml(post.title)}</div>
+                <div class="blog-slug">/${escapeHtml(post.slug)}</div>
+              </div>
+            </div>
+          </div>
+          <div class="blog-col author-col"><span class="blog-author-pill">${escapeHtml(post.authorName || 'Admin')}</span></div>
+          <div class="blog-col status-col">${badge(post.status)}</div>
+          <div class="blog-col date-col">${date(post.publishedAt || post.scheduledAt || post.createdAt)}</div>
+          <div class="blog-col action-col">
+            <button class="icon-btn" title="Edit post" onclick="blogForm('${post.id}')">✎</button>
+            <button class="icon-btn danger" title="Delete post" onclick="deleteBlogPost('${post.id}')">🗑</button>
+          </div>
+        </div>
+      `).join('') : '<div class="empty">No blog posts found.</div>'}`;
   } catch (error) {
     document.querySelector('#resource-table').innerHTML = `<div class="empty">Blog request failed: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function deleteBlogPost(id) {
+  if (!id || !confirm('Delete this blog post?')) return;
+  try {
+    await api(`blog/${id}`, { method: 'DELETE' });
+    toast('Blog post deleted successfully.');
+    loadBlog();
+  } catch (error) {
+    toast(`Delete failed: ${error.message}`);
   }
 }
 
@@ -281,5 +330,5 @@ async function settings() { const content = document.querySelector('#content'); 
 function analyticsPage() { document.querySelector('#content').innerHTML = pageHeading('Operations', 'Analytics', 'Compare revenue, category mix, and booking performance from live data.') + `<div class="grid dashboard-grid"><section class="panel">${panelHead('Revenue over time', '<button class="btn secondary">Last 30 days</button>')}<div class="chart"><div class="empty">Chart data will appear as booking history grows.</div></div></section><section class="panel">${panelHead('Booking funnel')}<div class="panel-body bars"><div class="bar-row"><span>Created</span><span class="bar"><i style="width:100%"></i></span><b>—</b></div><div class="bar-row"><span>Paid</span><span class="bar"><i style="width:70%"></i></span><b>—</b></div><div class="bar-row"><span>Completed</span><span class="bar"><i style="width:42%"></i></span><b>—</b></div></div></section></div>`; }
 function openDrawer(content) { document.body.insertAdjacentHTML('beforeend', `<div class="drawer-backdrop" onclick="closeDrawer()"></div><aside class="drawer">${content}</aside>`); }
 function closeDrawer() { document.querySelector('.drawer-backdrop')?.remove(); document.querySelector('.drawer')?.remove(); }
-window.navigate = navigate; window.listingForm = listingForm; window.blogForm = blogForm; window.blogPage = blogPage; window.closeDrawer = closeDrawer;
+window.navigate = navigate; window.listingForm = listingForm; window.blogForm = blogForm; window.blogPage = blogPage; window.closeDrawer = closeDrawer; window.deleteBlogPost = deleteBlogPost;
 boot();
