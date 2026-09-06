@@ -48,45 +48,7 @@ try {
         }
     }
 
-    if ($resource === 'blog' && $action === 'public' && $method === 'GET') {
-        $where = "status = 'PUBLISHED' AND publishedAt IS NOT NULL AND publishedAt <= UTC_TIMESTAMP()";
-        $params = [];
-        if (!empty($_GET['tag'])) {
-            $where .= ' AND JSON_CONTAINS(tags, ?, "$")';
-            $params[] = json_encode((string) $_GET['tag']);
-        }
-        $stmt = db()->prepare("SELECT id, slug, title, metaTitle, metaDescription, excerpt, body, authorName, category, tags, featuredImage, imageAltText, publishedAt FROM `BlogPost` WHERE $where ORDER BY publishedAt DESC");
-        $stmt->execute($params);
-        $posts = $stmt->fetchAll();
-        foreach ($posts as &$post) {
-            $post['body'] = sanitize_html((string) $post['body']);
-            $post['excerpt'] = sanitize_html((string) $post['excerpt']);
-            $post['tags'] = json_decode($post['tags'] ?? '[]', true) ?: [];
-        }
-        respond($posts);
-    }
-
     require_auth();
-
-    if ($resource === 'blog-authors' && $method === 'GET') {
-        try {
-            $authors = db()->query("SELECT id, name, email, role FROM `User` WHERE role IN ('OWNER','ADMIN','STAFF') AND isActive = 1 ORDER BY name ASC")->fetchAll();
-            respond($authors);
-        } catch (Throwable $error) {
-            global $config;
-            $database = $config['db'] ?? [];
-            error_log(sprintf(
-                '[blog-authors] Database failure: %s | SQLSTATE=%s | host=%s | database=%s | user=%s | request=%s',
-                $error->getMessage(),
-                $error instanceof PDOException ? (string) $error->getCode() : 'n/a',
-                $database['host'] ?? 'unknown',
-                $database['name'] ?? 'unknown',
-                $database['user'] ?? 'unknown',
-                $_SERVER['REQUEST_URI'] ?? '/api/blog-authors'
-            ));
-            fail('Staff accounts could not be loaded. Check the server database log.', 503);
-        }
-    }
 
     if ($resource === 'dashboard' && $method === 'GET') {
         $result = ['bookingsToday' => 0, 'revenue30' => 0, 'unassignedPickups' => 0, 'pendingPartners' => 0, 'failedPayments' => 0, 'categoryCounts' => [], 'recentOrders' => [], 'degraded' => []];
@@ -112,20 +74,12 @@ try {
 
     if ($resource === 'listings') {
         if ($method === 'GET') {
-            try {
-                $where = ['1 = 1']; $params = [];
-                if (!empty($_GET['search'])) { $where[] = '(l.title LIKE ? OR l.location LIKE ? OR p.businessName LIKE ?)'; $query = '%' . clean_text($_GET['search'], 100) . '%'; $params = [$query, $query, $query]; }
-                $category = strtoupper(clean_text($_GET['category'] ?? '', 32));
-                if ($category !== '' && in_array($category, ['STAY', 'RIDE', 'RENTAL', 'ACTIVITY'], true)) { $where[] = 'l.category = ?'; $params[] = $category; }
-                if (!empty($_GET['status'])) { $where[] = 'l.status = ?'; $params[] = strtoupper(clean_text($_GET['status'], 32)); }
-                $condition = implode(' AND ', $where);
-                $query = "SELECT l.id, l.slug, l.title, l.description, l.location, l.category, l.basePrice AS base_price, l.sellPrice AS sell_price, l.status, l.createdAt AS created_at, l.images, l.amenities, p.businessName AS partner_name FROM `Listing` l LEFT JOIN `Partner` p ON p.id = l.partnerId WHERE $condition ORDER BY l.createdAt DESC";
-                $countQuery = "SELECT COUNT(l.id) FROM `Listing` l LEFT JOIN `Partner` p ON p.id = l.partnerId WHERE $condition";
-                paged($query, $params, $countQuery, $params);
-            } catch (Throwable $error) {
-                error_log(sprintf('[listings] Database failure: %s | SQLSTATE=%s | category=%s | status=%s | request=%s', $error->getMessage(), $error instanceof PDOException ? (string) $error->getCode() : 'n/a', $_GET['category'] ?? '', $_GET['status'] ?? '', $_SERVER['REQUEST_URI'] ?? '/api/listings'));
-                fail('Listings could not be loaded. Check the server database log.', 503);
-            }
+            $where = ['1 = 1']; $params = [];
+            if (!empty($_GET['search'])) { $where[] = '(l.title LIKE ? OR l.location LIKE ? OR p.businessName LIKE ?)'; $query = '%' . clean_text($_GET['search'], 100) . '%'; $params = [$query, $query, $query]; }
+            if (!empty($_GET['category'])) { $where[] = 'l.category = ?'; $params[] = $_GET['category']; }
+            if (!empty($_GET['status'])) { $where[] = 'l.status = ?'; $params[] = $_GET['status']; }
+            $condition = implode(' AND ', $where);
+            paged("SELECT l.id, l.slug, l.title, l.description, l.location, l.category, l.basePrice AS base_price, l.sellPrice AS sell_price, l.status, l.createdAt AS created_at, l.images, l.amenities, p.businessName AS partner_name FROM `Listing` l LEFT JOIN `Partner` p ON p.id = l.partnerId WHERE $condition ORDER BY l.createdAt DESC", $params, "SELECT COUNT(*) FROM `Listing` l LEFT JOIN `Partner` p ON p.id = l.partnerId WHERE $condition", $params);
         }
         require_csrf();
         if ($method === 'DELETE' && $id) {
@@ -170,32 +124,10 @@ try {
         respond(['id' => $id, 'status' => $next]);
     }
 
-    if ($resource === 'media' && $id && $method === 'POST') {
-        require_csrf();
-        $filename = media_filename($id);
-        $directory = media_directory();
-        $path = $directory . DIRECTORY_SEPARATOR . $filename;
-        if (!is_file($path)) fail('Media file not found.', 404);
-        if (empty($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) fail('Replacement file was not received.', 422);
-        $file = $_FILES['file'];
-        $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
-        $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'video/mp4' => 'mp4', 'video/quicktime' => 'mov'];
-        $limit = str_starts_with($mime, 'video/') ? 100 * 1024 * 1024 : 10 * 1024 * 1024;
-        if (!isset($allowed[$mime]) || (int) $file['size'] > $limit) fail('Replacement file type or size is not supported.', 422);
-        $temporary = $path . '.replacement-' . bin2hex(random_bytes(6));
-        if (!move_uploaded_file($file['tmp_name'], $temporary) || !rename($temporary, $path)) fail('Replacement file could not be stored.', 500);
-        $metadata = media_metadata();
-        $metadata[$filename]['display_name'] = $metadata[$filename]['display_name'] ?? $file['name'];
-        $metadata[$filename]['updated_at'] = gmdate('c');
-        save_media_metadata($metadata);
-        audit('replace', 'media', $filename, ['mime' => $mime, 'size' => (int) $file['size']]);
-        respond(['filename' => $filename, 'public_url' => rtrim($config['app']['uploads_url'] ?? 'storage/uploads', '/') . '/' . rawurlencode($filename), 'mime_type' => $mime, 'size_bytes' => (int) $file['size']]);
-    }
-
     if ($resource === 'media' && $method === 'POST') {
         require_csrf();
         global $config;
-        $directory = media_directory();
+        $directory = $config['app']['uploads_dir'] ?? (__DIR__ . '/../storage/uploads');
         if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
             fail('Upload failed: the storage directory is not writable.', 500);
         }
@@ -214,53 +146,23 @@ try {
             fail('Upload failed: Hostinger could not write the file to storage.', 500);
         }
         $url = rtrim($config['app']['uploads_url'] ?? 'storage/uploads', '/') . '/' . rawurlencode($safeName);
-        $metadata = media_metadata();
-        $metadata[$safeName] = ['display_name' => $file['name'], 'alt_text' => '', 'updated_at' => gmdate('c')];
-        save_media_metadata($metadata);
         audit('upload', 'media', null, ['filename' => $safeName, 'mime' => $mime, 'size' => (int) $file['size']]);
         respond(['filename' => $safeName, 'public_url' => $url, 'mime_type' => $mime, 'size_bytes' => (int) $file['size'], 'usage_count' => 0]);
     }
 
-    if ($resource === 'media' && $id && $method === 'PATCH') {
-        require_csrf();
-        $filename = media_filename($id);
-        $path = media_directory() . DIRECTORY_SEPARATOR . $filename;
-        if (!is_file($path)) fail('Media file not found.', 404);
-        $input = json_input();
-        $metadata = media_metadata();
-        $current = $metadata[$filename] ?? [];
-        $displayName = clean_text($input['display_name'] ?? $current['display_name'] ?? $filename, 190);
-        if ($displayName === '') $displayName = $filename;
-        $metadata[$filename] = ['display_name' => $displayName, 'alt_text' => clean_text($input['alt_text'] ?? $current['alt_text'] ?? '', 255), 'updated_at' => gmdate('c')];
-        save_media_metadata($metadata);
-        audit('edit', 'media', $filename);
-        respond(['filename' => $filename, 'display_name' => $displayName, 'alt_text' => $metadata[$filename]['alt_text']]);
-    }
-
-    if ($resource === 'media' && $id && $method === 'DELETE') {
-        require_csrf();
-        $filename = media_filename($id);
-        $path = media_directory() . DIRECTORY_SEPARATOR . $filename;
-        if (!is_file($path)) fail('Media file not found.', 404);
-        if (!unlink($path)) fail('Media file could not be deleted.', 500);
-        $metadata = media_metadata(); unset($metadata[$filename]); save_media_metadata($metadata);
-        audit('delete', 'media', $filename);
-        respond(['deleted' => true]);
-    }
-
     if ($resource === 'media' && $method === 'GET') {
         global $config;
-        $directory = media_directory();
+        $directory = $config['app']['uploads_dir'] ?? (__DIR__ . '/../storage/uploads');
         if (!is_dir($directory)) {
             mkdir($directory, 0755, true);
         }
-        $files = []; $metadata = media_metadata();
+        $files = [];
         foreach (scandir($directory) ?: [] as $filename) {
             if ($filename === '.' || $filename === '..' || str_starts_with($filename, '.')) continue;
             $path = $directory . DIRECTORY_SEPARATOR . $filename;
             if (!is_file($path)) continue;
             $mime = function_exists('mime_content_type') ? mime_content_type($path) : 'application/octet-stream';
-            $files[] = ['filename' => $filename, 'display_name' => $metadata[$filename]['display_name'] ?? $filename, 'public_url' => rtrim($config['app']['uploads_url'] ?? 'storage/uploads', '/') . '/' . rawurlencode($filename), 'mime_type' => $mime, 'size_bytes' => filesize($path), 'alt_text' => $metadata[$filename]['alt_text'] ?? '', 'usage_count' => 0, 'created_at' => gmdate('Y-m-d H:i:s', filemtime($path))];
+            $files[] = ['filename' => $filename, 'public_url' => rtrim($config['app']['uploads_url'] ?? 'storage/uploads', '/') . '/' . rawurlencode($filename), 'mime_type' => $mime, 'size_bytes' => filesize($path), 'alt_text' => '', 'usage_count' => 0, 'created_at' => gmdate('Y-m-d H:i:s', filemtime($path))];
         }
         usort($files, static fn(array $left, array $right): int => strcmp($right['created_at'], $left['created_at']));
         respond($files);
@@ -305,41 +207,62 @@ try {
         respond(['deleted' => true]);
     }
 
+    if ($resource === 'blog' && $method === 'GET') {
+        $where = ['1 = 1'];
+        $params = [];
+        if (!empty($_GET['search'])) {
+            $search = '%' . clean_text($_GET['search'], 100) . '%';
+            $where[] = '(title LIKE ? OR slug LIKE ? OR authorName LIKE ?)';
+            $params = [$search, $search, $search];
+        }
+        $condition = implode(' AND ', $where);
+        [$page, $per, $offset] = page_params();
+        $countStmt = db()->prepare("SELECT COUNT(*) FROM `BlogPost` WHERE $condition");
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+        $stmt = db()->prepare("SELECT * FROM `BlogPost` WHERE $condition ORDER BY createdAt DESC LIMIT :per OFFSET :offset");
+        foreach ($params as $index => $value) $stmt->bindValue($index + 1, $value);
+        $stmt->bindValue(':per', $per, PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+        $posts = $stmt->fetchAll();
+        foreach ($posts as &$post) {
+            $post['body'] = sanitize_html((string) ($post['body'] ?? ''));
+            $post['excerpt'] = sanitize_html((string) ($post['excerpt'] ?? ''));
+            $post['tags'] = json_decode($post['tags'] ?? '[]', true) ?: [];
+        }
+        respond($posts, 200, ['page' => $page, 'perPage' => $per, 'total' => $total, 'pages' => (int) ceil($total / $per)]);
+    }
+
     if ($resource === 'blog' && in_array($method, ['POST', 'PATCH'], true)) {
         require_csrf();
         require_auth(['OWNER', 'ADMIN', 'STAFF']);
         $input = json_input();
         $errors = [];
-        foreach (['title', 'body'] as $field) if (trim((string) ($input[$field] ?? '')) === '') $errors[$field] = 'This field is required.';
-        $status = strtoupper(trim((string) ($input['status'] ?? 'DRAFT')));
-        if (!in_array($status, ['DRAFT', 'SCHEDULED', 'PUBLISHED', 'ARCHIVED'], true)) $errors['status'] = 'Invalid publication status.';
+        foreach (['title', 'body', 'status'] as $field) if (trim((string) ($input[$field] ?? '')) === '') $errors[$field] = 'This field is required.';
         $scheduledAt = !empty($input['scheduledAt']) ? str_replace('T', ' ', substr((string) $input['scheduledAt'], 0, 19)) : null;
-        if ($status === 'SCHEDULED' && (!$scheduledAt || strtotime($scheduledAt) <= time())) $errors['scheduledAt'] = 'Scheduled publish time must be in the future.';
+        if (($input['status'] ?? '') === 'SCHEDULED' && (!$scheduledAt || strtotime($scheduledAt) <= time())) $errors['scheduledAt'] = 'Scheduled publish time must be in the future.';
         if ($errors) fail('Blog post could not be saved.', 422, $errors);
         $slug = trim((string) ($input['slug'] ?? preg_replace('/[^a-z0-9]+/i', '-', strtolower((string) $input['title']))), '-');
-        $body = sanitize_html((string) $input['body']);
-        $excerpt = sanitize_html((string) ($input['excerpt'] ?? ''));
-        if (trim(strip_tags($body)) === '') fail('Blog post could not be saved.', 422, ['body' => 'Add meaningful post content before saving.']);
-        $authorId = clean_text($input['authorId'] ?? actor()['id'] ?? '', 191);
-        $authorStmt = db()->prepare("SELECT id, name FROM `User` WHERE id = ? AND role IN ('OWNER','ADMIN','STAFF') AND isActive = 1 LIMIT 1");
-        $authorStmt->execute([$authorId]);
-        $author = $authorStmt->fetch();
-        if (!$author) fail('Blog post could not be saved.', 422, ['authorId' => 'Select an active owner, admin, or staff account.']);
-        $authorName = $author['name'];
+        $body = (string) $input['body'];
+        $body = preg_replace('/<script\b[^>]*>.*?<\/script>/is', '', $body);
+        $body = preg_replace('/<style\b[^>]*>.*?<\/style>/is', '', $body);
+        $body = preg_replace('/\son\w+\s*=\s*(["\']).*?\1/is', '', $body);
         $tags = is_array($input['tags'] ?? null) ? $input['tags'] : array_values(array_filter(array_map('trim', explode(',', (string) ($input['tags'] ?? '')))));
         $duplicate = db()->prepare('SELECT id FROM `BlogPost` WHERE slug = ? AND id <> ? LIMIT 1');
         $duplicate->execute([$slug, $id ?? '']);
         if ($duplicate->fetchColumn()) fail('Blog post could not be saved.', 409, ['slug' => 'This slug is already in use.']);
-        $publishedAt = $status === 'PUBLISHED' ? gmdate('Y-m-d H:i:s.v') : null;
+        $publishedAt = ($input['status'] ?? '') === 'PUBLISHED' ? gmdate('Y-m-d H:i:s.v') : null;
+        $authorName = clean_text($input['authorName'] ?? actor()['name'] ?? 'Admin', 191);
         if ($method === 'POST') {
             $newId = bin2hex(random_bytes(12));
             $stmt = db()->prepare('INSERT INTO `BlogPost` (id, slug, title, metaTitle, metaDescription, excerpt, body, authorName, category, primaryKeyword, tags, featuredImage, imageAltText, status, publishedAt, createdAt, updatedAt, authorId, imageUrls, scheduledAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3), ?, ?, ?)');
-            $stmt->execute([$newId, $slug, clean_text($input['title'], 191), clean_text($input['metaTitle'] ?? $input['title'], 191), clean_text($input['metaDescription'] ?? '', 500), $excerpt, $body, $authorName, clean_text($input['category'] ?? '', 191), clean_text($input['primaryKeyword'] ?? '', 191), json_encode($tags), $input['featuredImage'] ?? null, clean_text($input['imageAltText'] ?? '', 191), $status, $publishedAt, $authorId, json_encode($input['imageUrls'] ?? []), $scheduledAt]);
+            $stmt->execute([$newId, $slug, clean_text($input['title'], 191), clean_text($input['metaTitle'] ?? $input['title'], 191), clean_text($input['metaDescription'] ?? '', 500), clean_text($input['excerpt'] ?? '', 500), $body, $authorName, clean_text($input['category'] ?? '', 191), clean_text($input['primaryKeyword'] ?? '', 191), json_encode($tags), $input['featuredImage'] ?? null, clean_text($input['imageAltText'] ?? '', 191), $input['status'], $publishedAt, actor()['id'] ?? null, json_encode($input['imageUrls'] ?? []), $scheduledAt]);
             audit('create', 'BlogPost', $newId);
             respond(['id' => $newId]);
         }
         $stmt = db()->prepare('UPDATE `BlogPost` SET slug=?, title=?, metaTitle=?, metaDescription=?, excerpt=?, body=?, authorName=?, category=?, primaryKeyword=?, tags=?, featuredImage=?, imageAltText=?, status=?, publishedAt=?, updatedAt=UTC_TIMESTAMP(3), scheduledAt=? WHERE id=?');
-        $stmt->execute([$slug, clean_text($input['title'], 191), clean_text($input['metaTitle'] ?? $input['title'], 191), clean_text($input['metaDescription'] ?? '', 500), $excerpt, $body, $authorName, clean_text($input['category'] ?? '', 191), clean_text($input['primaryKeyword'] ?? '', 191), json_encode($tags), $input['featuredImage'] ?? null, clean_text($input['imageAltText'] ?? '', 191), $status, $publishedAt, $scheduledAt, $id]);
+        $stmt->execute([$slug, clean_text($input['title'], 191), clean_text($input['metaTitle'] ?? $input['title'], 191), clean_text($input['metaDescription'] ?? '', 500), clean_text($input['excerpt'] ?? '', 500), $body, $authorName, clean_text($input['category'] ?? '', 191), clean_text($input['primaryKeyword'] ?? '', 191), json_encode($tags), $input['featuredImage'] ?? null, clean_text($input['imageAltText'] ?? '', 191), $input['status'], $publishedAt, $scheduledAt, $id]);
         audit('edit', 'BlogPost', $id);
         respond(['id' => $id]);
     }

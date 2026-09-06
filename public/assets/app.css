@@ -160,6 +160,7 @@ tbody tr:hover { background: #f7f7f8; }
 .rich-canvas, .rich-source { min-width: 0; min-height: 260px; padding: 14px; outline: 0; line-height: 1.65; overflow-wrap: anywhere; }
 .rich-canvas:focus, .rich-source:focus { box-shadow: inset 0 0 0 2px rgba(0,111,187,.2); }
 .rich-canvas img { max-width: 100%; height: auto; }
+.rich-canvas img.editor-image-selected { outline: 2px solid var(--focus); outline-offset: 3px; }
 .rich-canvas table { width: 100%; border-collapse: collapse; margin: 14px 0; }
 .rich-canvas th, .rich-canvas td { padding: 8px; border: 1px solid var(--line-strong); }
 .rich-canvas blockquote { margin: 14px 0; padding: 8px 14px; border-left: 3px solid var(--success); background: var(--surface-subtle); color: var(--muted); }
