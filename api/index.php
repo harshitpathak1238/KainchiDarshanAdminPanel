@@ -244,12 +244,11 @@ try {
         require_csrf();
         require_auth(['OWNER', 'ADMIN', 'STAFF']);
         $input = json_input();
-        $errors = [];
-        foreach (['title', 'body', 'status'] as $field) if (trim((string) ($input[$field] ?? '')) === '') $errors[$field] = 'This field is required.';
+        $status = in_array($input['status'] ?? '', ['DRAFT', 'SCHEDULED', 'PUBLISHED', 'ARCHIVED'], true) ? $input['status'] : 'DRAFT';
         $scheduledAt = !empty($input['scheduledAt']) ? str_replace('T', ' ', substr((string) $input['scheduledAt'], 0, 19)) : null;
-        if (($input['status'] ?? '') === 'SCHEDULED' && (!$scheduledAt || strtotime($scheduledAt) <= time())) $errors['scheduledAt'] = 'Scheduled publish time must be in the future.';
-        if ($errors) fail('Blog post could not be saved.', 422, $errors);
+        if ($status === 'SCHEDULED' && (!$scheduledAt || strtotime($scheduledAt) <= time())) fail('Blog post could not be saved.', 422, ['scheduledAt' => 'Scheduled publish time must be in the future.']);
         $slug = trim((string) ($input['slug'] ?? preg_replace('/[^a-z0-9]+/i', '-', strtolower((string) $input['title']))), '-');
+        if ($slug === '') $slug = 'draft-' . bin2hex(random_bytes(6));
         $body = (string) $input['body'];
         $body = preg_replace('/<script\b[^>]*>.*?<\/script>/is', '', $body);
         $body = preg_replace('/<style\b[^>]*>.*?<\/style>/is', '', $body);
@@ -258,7 +257,7 @@ try {
         $duplicate = db()->prepare('SELECT id FROM `BlogPost` WHERE slug = ? AND id <> ? LIMIT 1');
         $duplicate->execute([$slug, $id ?? '']);
         if ($duplicate->fetchColumn()) fail('Blog post could not be saved.', 409, ['slug' => 'This slug is already in use.']);
-        $publishedAt = ($input['status'] ?? '') === 'PUBLISHED' ? gmdate('Y-m-d H:i:s.v') : null;
+        $publishedAt = $status === 'PUBLISHED' ? gmdate('Y-m-d H:i:s.v') : null;
         $authorId = clean_text($input['authorId'] ?? actor()['id'] ?? '', 191) ?: null;
         $authorName = clean_text($input['authorName'] ?? actor()['name'] ?? 'Admin', 191);
         if ($authorId) {
@@ -270,12 +269,12 @@ try {
         if ($method === 'POST') {
             $newId = bin2hex(random_bytes(12));
             $stmt = db()->prepare('INSERT INTO `BlogPost` (id, slug, title, metaTitle, metaDescription, excerpt, body, authorName, category, primaryKeyword, tags, featuredImage, imageAltText, status, publishedAt, createdAt, updatedAt, authorId, imageUrls, scheduledAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3), ?, ?, ?)');
-            $stmt->execute([$newId, $slug, clean_text($input['title'], 191), clean_text($input['metaTitle'] ?? $input['title'], 191), clean_text($input['metaDescription'] ?? '', 500), clean_text($input['excerpt'] ?? '', 500), $body, $authorName, clean_text($input['category'] ?? '', 191), clean_text($input['primaryKeyword'] ?? '', 191), json_encode($tags), $input['featuredImage'] ?? null, clean_text($input['imageAltText'] ?? '', 191), $input['status'], $publishedAt, $authorId, json_encode($input['imageUrls'] ?? []), $scheduledAt]);
+            $stmt->execute([$newId, $slug, clean_text($input['title'] ?? '', 191), clean_text($input['metaTitle'] ?? $input['title'] ?? '', 191), clean_text($input['metaDescription'] ?? '', 500), clean_text($input['excerpt'] ?? '', 500), $body, $authorName, clean_text($input['category'] ?? '', 191), clean_text($input['primaryKeyword'] ?? '', 191), json_encode($tags), $input['featuredImage'] ?? null, clean_text($input['imageAltText'] ?? '', 191), $status, $publishedAt, $authorId, json_encode($input['imageUrls'] ?? []), $scheduledAt]);
             audit('create', 'BlogPost', $newId);
             respond(['id' => $newId]);
         }
         $stmt = db()->prepare('UPDATE `BlogPost` SET slug=?, title=?, metaTitle=?, metaDescription=?, excerpt=?, body=?, authorName=?, category=?, primaryKeyword=?, tags=?, featuredImage=?, imageAltText=?, status=?, publishedAt=?, updatedAt=UTC_TIMESTAMP(3), scheduledAt=? WHERE id=?');
-        $stmt->execute([$slug, clean_text($input['title'], 191), clean_text($input['metaTitle'] ?? $input['title'], 191), clean_text($input['metaDescription'] ?? '', 500), clean_text($input['excerpt'] ?? '', 500), $body, $authorName, clean_text($input['category'] ?? '', 191), clean_text($input['primaryKeyword'] ?? '', 191), json_encode($tags), $input['featuredImage'] ?? null, clean_text($input['imageAltText'] ?? '', 191), $input['status'], $publishedAt, $scheduledAt, $id]);
+        $stmt->execute([$slug, clean_text($input['title'] ?? '', 191), clean_text($input['metaTitle'] ?? $input['title'] ?? '', 191), clean_text($input['metaDescription'] ?? '', 500), clean_text($input['excerpt'] ?? '', 500), $body, $authorName, clean_text($input['category'] ?? '', 191), clean_text($input['primaryKeyword'] ?? '', 191), json_encode($tags), $input['featuredImage'] ?? null, clean_text($input['imageAltText'] ?? '', 191), $status, $publishedAt, $scheduledAt, $id]);
         audit('edit', 'BlogPost', $id);
         respond(['id' => $id]);
     }
