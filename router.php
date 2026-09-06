@@ -16,6 +16,11 @@ if (str_starts_with($path, '/admin/api/')) {
     return true;
 }
 
+if (str_starts_with($path, '/admin/') && preg_match('#^/admin/(?:dashboard|orders|listings|stays|rides|rentals|activities|packages|customers|partners|pickups|payouts|analytics|blog|blog-new|blog-edit|media|settings)\.html$#', $path)) {
+    require __DIR__ . '/public/index.html';
+    return true;
+}
+
 if ($path === '/admin' || $path === '/admin/') {
     require __DIR__ . '/public/index.html';
     return true;

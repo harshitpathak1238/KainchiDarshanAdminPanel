@@ -11,6 +11,7 @@ RewriteRule ^(private|storage/private)(/|$) - [F,L]
 # These rules are relative to /admin, so the frontend at the site root is untouched.
 RewriteRule ^assets/(.*)$ public/assets/$1 [L]
 RewriteRule ^api/(.*)$ api/index.php [QSA,L]
+RewriteRule ^(dashboard|orders|listings|stays|rides|rentals|activities|packages|customers|partners|pickups|payouts|analytics|blog|blog-new|blog-edit|media|settings)\.html$ index.php [QSA,L]
 RewriteRule ^$ index.php [L]
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d

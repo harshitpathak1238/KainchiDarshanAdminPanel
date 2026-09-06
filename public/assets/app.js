@@ -13,6 +13,7 @@ const pageFiles = {
   dashboard: 'dashboard.html', orders: 'orders.html', listings: 'listings.html', stays: 'stays.html', rides: 'rides.html', rentals: 'rentals.html', activities: 'activities.html', packages: 'packages.html',
   customers: 'customers.html', partners: 'partners.html', pickups: 'pickups.html', payouts: 'payouts.html', analytics: 'analytics.html', blog: 'blog.html', media: 'media.html', settings: 'settings.html',
 };
+const pathRoutes = { dashboard: 'dashboard', orders: 'orders', listings: 'listings', stays: 'stays', rides: 'rides', rentals: 'rentals', activities: 'activities', packages: 'packages', customers: 'customers', partners: 'partners', pickups: 'pickups', payouts: 'payouts', analytics: 'analytics', blog: 'blog', media: 'media', settings: 'settings', 'blog-new': 'blog-new', 'blog-edit': 'blog-edit' };
 
 async function api(path, options = {}) {
   const request = { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } };
@@ -59,7 +60,8 @@ function renderShell() {
   document.querySelector('#mobile-menu').onclick = () => document.querySelector('#sidebar').classList.toggle('open');
   document.querySelector('#sign-out').onclick = async () => { try { await api('auth/logout', { method: 'POST' }); state.user = null; renderLogin(); } catch (error) { toast(error.message); } };
   const page = document.body.dataset.page;
-  renderRoute(page || location.hash.slice(1) || 'dashboard');
+  const pageName = location.pathname.split('/').pop()?.replace(/\.html$/, '');
+  renderRoute(page || pathRoutes[pageName] || location.hash.slice(1) || 'dashboard');
 }
 
 function navigate(route) {
@@ -72,7 +74,8 @@ function navigate(route) {
 
 function renderRoute(route) {
   state.route = route; state.page = 1;
-  if (route === 'blog-editor') return blogForm(new URLSearchParams(location.search).get('id') || '');
+  if (route === 'blog-new') return blogForm();
+  if (route === 'blog-edit') return blogForm(new URLSearchParams(location.search).get('id') || '');
   document.querySelector('#content')?.classList.remove('content-blog-editor');
   document.querySelectorAll('[data-route]').forEach(button => button.classList.toggle('active', button.dataset.route === route));
   document.querySelector('#sidebar')?.classList.remove('open');
