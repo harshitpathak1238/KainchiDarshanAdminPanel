@@ -35,7 +35,7 @@ function clean_text($value,int $max=500): string { return mb_substr(trim((string
 function money($value): string { return number_format((float)$value,2,'.',''); }
 function media_directory(): string {
     global $config;
-    return $config['app']['uploads_dir'] ?? (__DIR__ . '/../storage/uploads');
+    return $config['app']['uploads_dir'] ?? (__DIR__ . '/../../uploads/images');
 }
 function media_metadata_path(): string { return media_directory() . DIRECTORY_SEPARATOR . '.media.json'; }
 function media_metadata(): array {

@@ -94,6 +94,18 @@ function badge(value) { return `<span class="status ${String(value || '').toLowe
 function money(value) { return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 }); }
 function date(value) { return value ? new Date(`${value}Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char])); }
+function sanitizePreviewHtml(html) {
+  const documentFragment = new DOMParser().parseFromString(String(html || ''), 'text/html');
+  documentFragment.querySelectorAll('script,style,object,embed,form,input,button,textarea,link,meta').forEach(node => node.remove());
+  documentFragment.querySelectorAll('*').forEach(node => {
+    Array.from(node.attributes).forEach(attribute => {
+      const name = attribute.name.toLowerCase();
+      const value = attribute.value.trim().toLowerCase();
+      if (name.startsWith('on') || (['href', 'src'].includes(name) && value.startsWith('javascript:'))) node.removeAttribute(attribute.name);
+    });
+  });
+  return documentFragment.body.innerHTML;
+}
 function debounce(callback, wait = 300) { let timer; return (...args) => { clearTimeout(timer); timer = setTimeout(() => callback(...args), wait); }; }
 function toast(message) { document.querySelector('.toast')?.remove(); document.body.insertAdjacentHTML('beforeend', `<div class="toast">${escapeHtml(message)}</div>`); setTimeout(() => document.querySelector('.toast')?.remove(), 3500); }
 
@@ -389,11 +401,12 @@ async function blogForm(id = '') {
       const payload = await response.json().catch(() => ({ error: 'Upload failed.' }));
       if (!response.ok) throw new Error(payload.error || 'Upload failed.');
       const url = payload.data?.public_url || payload.public_url || '';
+      const storageLocation = payload.data?.storage_location || payload.storage_location || '/uploads/images';
       document.querySelector('input[name="featuredImage"]').value = url;
       document.querySelector('#featured-image-name').textContent = file.name;
       const preview = document.querySelector('#featured-image-preview');
       preview.innerHTML = url ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(file.name)}">` : 'No image selected';
-      toast('Featured image uploaded successfully.');
+      toast(`Image uploaded. Saved in ${storageLocation}.`);
     } catch (error) {
       toast(`Image upload failed: ${error.message}`);
     }
@@ -418,7 +431,21 @@ async function blogForm(id = '') {
   document.querySelector('#blog-save-btn').addEventListener('click', savePost);
   document.querySelector('#blog-preview-btn').addEventListener('click', () => {
     const previewWindow = window.open('', '_blank', 'noopener,noreferrer');
-    const html = `<!doctype html><html><head><title>${escapeHtml(document.querySelector('input[name="title"]').value || 'Untitled post')}</title><style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#1a1a1a;line-height:1.7}h1,h2{font-weight:700}img{max-width:100%;height:auto;border-radius:10px}p{margin:16px 0}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px}</style></head><body>${bodyEditor.source.value}</body></html>`;
+    if (!previewWindow) {
+      toast('Preview was blocked. Allow pop-ups for this admin site and try again.');
+      return;
+    }
+    const title = document.querySelector('[name="title"]').value.trim() || 'Untitled post';
+    const excerpt = document.querySelector('[name="excerpt"]').value.trim();
+    const featuredImage = document.querySelector('[name="featuredImage"]').value.trim();
+    const imageAlt = document.querySelector('[name="imageAltText"]').value.trim() || title;
+    const bodyHtml = sanitizePreviewHtml(bodyEditor.source.value) || '<p>No post content yet.</p>';
+    const featuredMarkup = featuredImage ? `<img class="featured-image" src="${escapeHtml(featuredImage)}" alt="${escapeHtml(imageAlt)}">` : '';
+    const excerptMarkup = excerpt ? `<p class="excerpt">${escapeHtml(excerpt)}</p>` : '';
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>
+      :root{color-scheme:light}*{box-sizing:border-box}body{margin:0;background:#f6f6f7;color:#202223;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.7}.preview-shell{width:min(860px,100%);margin:0 auto;padding:48px 24px 72px;background:#fff;min-height:100vh}h1{margin:0 0 16px;color:#183b63;font-size:clamp(30px,5vw,48px);line-height:1.12}h2,h3{color:#183b63;line-height:1.25}.excerpt{margin:0 0 28px;color:#5f6872;font-size:18px}.featured-image{display:block;width:100%;max-height:430px;object-fit:cover;margin:0 0 32px;border-radius:8px}.post-body{overflow-wrap:anywhere}.post-body img{display:block;max-width:100%;height:auto;margin:20px 0;border-radius:8px}.post-body table{width:100%;border-collapse:collapse;margin:20px 0}.post-body th,.post-body td{padding:10px;border:1px solid #c9cccf;text-align:left}.post-body blockquote{margin:20px 0;padding:12px 18px;border-left:4px solid #008060;background:#f1f7f4;color:#5f6872}.video-embed{aspect-ratio:16/9;margin:20px 0}.video-embed iframe{width:100%;height:100%;border:0}@media(max-width:600px){.preview-shell{padding:28px 16px 48px}.excerpt{font-size:16px}}
+    </style></head><body><main class="preview-shell"><h1>${escapeHtml(title)}</h1>${featuredMarkup}${excerptMarkup}<article class="post-body">${bodyHtml}</article></main></body></html>`;
+    previewWindow.document.open();
     previewWindow.document.write(html);
     previewWindow.document.close();
   });
