@@ -112,12 +112,20 @@ try {
 
     if ($resource === 'listings') {
         if ($method === 'GET') {
-            $where = ['1 = 1']; $params = [];
-            if (!empty($_GET['search'])) { $where[] = '(l.title LIKE ? OR l.location LIKE ? OR p.businessName LIKE ?)'; $query = '%' . clean_text($_GET['search'], 100) . '%'; $params = [$query, $query, $query]; }
-            if (!empty($_GET['category'])) { $where[] = 'l.category = ?'; $params[] = $_GET['category']; }
-            if (!empty($_GET['status'])) { $where[] = 'l.status = ?'; $params[] = $_GET['status']; }
-            $condition = implode(' AND ', $where);
-            paged("SELECT l.id, l.slug, l.title, l.description, l.location, l.category, l.basePrice AS base_price, l.sellPrice AS sell_price, l.status, l.createdAt AS created_at, l.images, l.amenities, p.businessName AS partner_name FROM `Listing` l LEFT JOIN `Partner` p ON p.id = l.partnerId WHERE $condition ORDER BY l.createdAt DESC", $params, "SELECT COUNT(*) FROM `Listing` l LEFT JOIN `Partner` p ON p.id = l.partnerId WHERE $condition", $params);
+            try {
+                $where = ['1 = 1']; $params = [];
+                if (!empty($_GET['search'])) { $where[] = '(l.title LIKE ? OR l.location LIKE ? OR p.businessName LIKE ?)'; $query = '%' . clean_text($_GET['search'], 100) . '%'; $params = [$query, $query, $query]; }
+                $category = strtoupper(clean_text($_GET['category'] ?? '', 32));
+                if ($category !== '' && in_array($category, ['STAY', 'RIDE', 'RENTAL', 'ACTIVITY'], true)) { $where[] = 'l.category = ?'; $params[] = $category; }
+                if (!empty($_GET['status'])) { $where[] = 'l.status = ?'; $params[] = strtoupper(clean_text($_GET['status'], 32)); }
+                $condition = implode(' AND ', $where);
+                $query = "SELECT l.id, l.slug, l.title, l.description, l.location, l.category, l.basePrice AS base_price, l.sellPrice AS sell_price, l.status, l.createdAt AS created_at, l.images, l.amenities, p.businessName AS partner_name FROM `Listing` l LEFT JOIN `Partner` p ON p.id = l.partnerId WHERE $condition ORDER BY l.createdAt DESC";
+                $countQuery = "SELECT COUNT(l.id) FROM `Listing` l LEFT JOIN `Partner` p ON p.id = l.partnerId WHERE $condition";
+                paged($query, $params, $countQuery, $params);
+            } catch (Throwable $error) {
+                error_log(sprintf('[listings] Database failure: %s | SQLSTATE=%s | category=%s | status=%s | request=%s', $error->getMessage(), $error instanceof PDOException ? (string) $error->getCode() : 'n/a', $_GET['category'] ?? '', $_GET['status'] ?? '', $_SERVER['REQUEST_URI'] ?? '/api/listings'));
+                fail('Listings could not be loaded. Check the server database log.', 503);
+            }
         }
         require_csrf();
         if ($method === 'DELETE' && $id) {
