@@ -181,7 +181,7 @@ try {
         $metadata[$filename]['updated_at'] = gmdate('c');
         save_media_metadata($metadata);
         audit('replace', 'media', $filename, ['mime' => $mime, 'size' => (int) $file['size']]);
-        respond(['filename' => $filename, 'public_url' => rtrim($config['app']['uploads_url'] ?? '/uploads/images', '/') . '/' . rawurlencode($filename), 'mime_type' => $mime, 'size_bytes' => (int) $file['size']);
+        respond(['filename' => $filename, 'public_url' => rtrim($config['app']['uploads_url'] ?? 'storage/uploads', '/') . '/' . rawurlencode($filename), 'mime_type' => $mime, 'size_bytes' => (int) $file['size']]);
     }
 
     if ($resource === 'media' && $method === 'POST') {
@@ -205,12 +205,12 @@ try {
         if (!move_uploaded_file($file['tmp_name'], $directory . DIRECTORY_SEPARATOR . $safeName)) {
             fail('Upload failed: Hostinger could not write the file to storage.', 500);
         }
-        $url = rtrim($config['app']['uploads_url'] ?? '/uploads/images', '/') . '/' . rawurlencode($safeName);
+        $url = rtrim($config['app']['uploads_url'] ?? 'storage/uploads', '/') . '/' . rawurlencode($safeName);
         $metadata = media_metadata();
         $metadata[$safeName] = ['display_name' => $file['name'], 'alt_text' => '', 'updated_at' => gmdate('c')];
         save_media_metadata($metadata);
         audit('upload', 'media', null, ['filename' => $safeName, 'mime' => $mime, 'size' => (int) $file['size']]);
-        respond(['filename' => $safeName, 'public_url' => $url, 'storage_location' => rtrim($config['app']['uploads_url'] ?? '/uploads/images', '/'), 'mime_type' => $mime, 'size_bytes' => (int) $file['size'], 'usage_count' => 0]);
+        respond(['filename' => $safeName, 'public_url' => $url, 'mime_type' => $mime, 'size_bytes' => (int) $file['size'], 'usage_count' => 0]);
     }
 
     if ($resource === 'media' && $id && $method === 'PATCH') {
@@ -252,7 +252,7 @@ try {
             $path = $directory . DIRECTORY_SEPARATOR . $filename;
             if (!is_file($path)) continue;
             $mime = function_exists('mime_content_type') ? mime_content_type($path) : 'application/octet-stream';
-            $files[] = ['filename' => $filename, 'display_name' => $metadata[$filename]['display_name'] ?? $filename, 'public_url' => rtrim($config['app']['uploads_url'] ?? '/uploads/images', '/') . '/' . rawurlencode($filename), 'mime_type' => $mime, 'size_bytes' => filesize($path), 'alt_text' => $metadata[$filename]['alt_text'] ?? '', 'usage_count' => 0, 'created_at' => gmdate('Y-m-d H:i:s', filemtime($path))];
+            $files[] = ['filename' => $filename, 'display_name' => $metadata[$filename]['display_name'] ?? $filename, 'public_url' => rtrim($config['app']['uploads_url'] ?? 'storage/uploads', '/') . '/' . rawurlencode($filename), 'mime_type' => $mime, 'size_bytes' => filesize($path), 'alt_text' => $metadata[$filename]['alt_text'] ?? '', 'usage_count' => 0, 'created_at' => gmdate('Y-m-d H:i:s', filemtime($path))];
         }
         usort($files, static fn(array $left, array $right): int => strcmp($right['created_at'], $left['created_at']));
         respond($files);
