@@ -12,7 +12,7 @@ return [
         'base_url' => '',
         'timezone' => 'Asia/Kolkata',
         'secure_cookies' => true,
-        'uploads_dir' => __DIR__ . '/../uploads/images',
-        'uploads_url' => '/uploads/images',
+        'uploads_dir' => __DIR__ . '/storage/uploads',
+        'uploads_url' => 'storage/uploads',
     ],
 ];

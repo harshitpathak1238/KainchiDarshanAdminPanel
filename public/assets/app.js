@@ -401,7 +401,7 @@ async function blogForm(id = '') {
       const payload = await response.json().catch(() => ({ error: 'Upload failed.' }));
       if (!response.ok) throw new Error(payload.error || 'Upload failed.');
       const url = payload.data?.public_url || payload.public_url || '';
-      const storageLocation = payload.data?.storage_location || payload.storage_location || '/uploads/images';
+      const storageLocation = payload.data?.storage_location || payload.storage_location || 'storage/uploads';
       document.querySelector('input[name="featuredImage"]').value = url;
       document.querySelector('#featured-image-name').textContent = file.name;
       const preview = document.querySelector('#featured-image-preview');
