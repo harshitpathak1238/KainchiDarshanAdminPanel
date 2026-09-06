@@ -285,7 +285,20 @@ function initializeRichEditor(wrapper) {
   const editor = { wrapper, visual: wrapper.querySelector('[contenteditable]'), source: wrapper.querySelector('textarea'), savedRange: null, sourceMode: false };
   wrapper._richEditor = editor;
   const rememberRange = () => { const selection = window.getSelection(); if (selection?.rangeCount && editor.visual.contains(selection.anchorNode)) editor.savedRange = selection.getRangeAt(0).cloneRange(); };
-  const syncSource = () => { editor.source.value = editor.visual.innerHTML; updateEditorSize(editor); };
+  const updateCommandState = () => {
+    const selection = window.getSelection();
+    const anchor = selection?.anchorNode;
+    if (!anchor || !editor.visual.contains(anchor)) return;
+    const block = anchor.nodeType === Node.ELEMENT_NODE ? anchor : anchor.parentElement;
+    const format = document.queryCommandValue('formatBlock').toLowerCase().replace(/[<>]/g, '');
+    wrapper.querySelectorAll('[data-editor-command]').forEach(button => {
+      const command = button.dataset.editorCommand;
+      const active = command === 'h2' || command === 'h3' ? format === command : command === 'blockquote' ? format === 'blockquote' : command === 'link' ? Boolean(block?.closest('a')) : ['bold', 'italic', 'insertUnorderedList', 'insertOrderedList'].includes(command) && document.queryCommandState(command);
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+  };
+  const syncSource = () => { editor.source.value = editor.visual.innerHTML; updateEditorSize(editor); updateCommandState(); };
   const runCommand = async command => {
     rememberRange(); editor.visual.focus();
     if (command === 'link') { const url = prompt('Link URL'); if (url) document.execCommand('createLink', false, url); }
@@ -298,15 +311,20 @@ function initializeRichEditor(wrapper) {
     syncSource();
   };
   editor.visual.addEventListener('input', syncSource);
-  editor.visual.addEventListener('keyup', rememberRange);
-  editor.visual.addEventListener('mouseup', rememberRange);
+  editor.visual.addEventListener('keyup', () => { rememberRange(); updateCommandState(); });
+  editor.visual.addEventListener('mouseup', () => { rememberRange(); updateCommandState(); });
+  editor.visual.addEventListener('focus', updateCommandState);
+  document.addEventListener('selectionchange', updateCommandState);
   editor.source.addEventListener('input', () => updateEditorSize(editor));
   wrapper.querySelectorAll('[data-editor-command]').forEach(button => { button.addEventListener('mousedown', event => event.preventDefault()); button.onclick = () => runCommand(button.dataset.editorCommand); });
   wrapper.querySelector('[data-editor-toggle]').onclick = () => {
     editor.sourceMode = !editor.sourceMode;
     if (editor.sourceMode) syncSource(); else editor.visual.innerHTML = editor.source.value;
     editor.visual.classList.toggle('hidden', editor.sourceMode); editor.source.classList.toggle('hidden', !editor.sourceMode);
-    wrapper.querySelector('[data-editor-toggle]').textContent = editor.sourceMode ? 'Visual editor' : 'Edit code';
+    const sourceToggle = wrapper.querySelector('[data-editor-toggle]');
+    sourceToggle.textContent = editor.sourceMode ? 'Visual editor' : 'Edit code';
+    sourceToggle.classList.toggle('active', editor.sourceMode);
+    sourceToggle.setAttribute('aria-pressed', String(editor.sourceMode));
   };
   syncSource();
   return editor;
@@ -320,7 +338,7 @@ function setRichEditorValue(id, value) {
 async function blogForm(id = '') {
   const content = document.querySelector('#content');
   content.classList.add('content-blog-editor');
-  const editorMarkup = (id, name, label, small = false) => `<div class="rich-editor" id="${id}-editor"><div class="rich-toolbar"><button type="button" data-editor-command="bold"><strong>B</strong></button><button type="button" data-editor-command="italic"><em>I</em></button><button type="button" data-editor-command="h2">H2</button><button type="button" data-editor-command="h3">H3</button><button type="button" data-editor-command="insertUnorderedList">• List</button><button type="button" data-editor-command="insertOrderedList">1. List</button><button type="button" data-editor-command="blockquote">Quote</button><button type="button" data-editor-command="link">Link</button>${small ? '' : '<button type="button" data-editor-command="table">Table</button><button type="button" data-editor-command="image">Image</button><button type="button" data-editor-command="video">Video</button>'}<button type="button" class="source-toggle" data-editor-toggle>Edit code</button></div><div class="rich-canvas" contenteditable="true" role="textbox" aria-label="${label}"></div><textarea name="${name}" class="rich-source blog-editor-input hidden" rows="${small ? 5 : 18}" aria-label="${label} HTML"></textarea><div class="content-size-warning">0 KB of HTML</div></div>`;
+  const editorMarkup = (id, name, label, small = false) => `<div class="rich-editor" id="${id}-editor"><div class="rich-toolbar"><button type="button" data-editor-command="bold" title="Bold" aria-label="Bold" aria-pressed="false"><strong>B</strong></button><button type="button" data-editor-command="italic" title="Italic" aria-label="Italic" aria-pressed="false"><em>I</em></button><button type="button" data-editor-command="h2" title="Heading 2" aria-label="Heading 2" aria-pressed="false">H2</button><button type="button" data-editor-command="h3" title="Heading 3" aria-label="Heading 3" aria-pressed="false">H3</button><button type="button" data-editor-command="insertUnorderedList" title="Bulleted list" aria-label="Bulleted list" aria-pressed="false">&bull;</button><button type="button" data-editor-command="insertOrderedList" title="Numbered list" aria-label="Numbered list" aria-pressed="false">1.</button><button type="button" data-editor-command="blockquote" title="Quote" aria-label="Quote" aria-pressed="false">&quot;</button><button type="button" data-editor-command="link" title="Insert link" aria-label="Insert link" aria-pressed="false">&#8599;</button>${small ? '' : '<button type="button" data-editor-command="table" title="Insert table" aria-label="Insert table">&#9638;</button><button type="button" data-editor-command="image" title="Insert image" aria-label="Insert image">&#9633;</button><button type="button" data-editor-command="video" title="Insert video" aria-label="Insert video">&#9654;</button>'}<button type="button" class="source-toggle" data-editor-toggle title="Edit HTML source" aria-label="Edit HTML source" aria-pressed="false">Edit code</button></div><div class="rich-canvas" contenteditable="true" role="textbox" aria-label="${label}"></div><textarea name="${name}" class="rich-source blog-editor-input hidden" rows="${small ? 5 : 18}" aria-label="${label} HTML"></textarea><div class="content-size-warning">0 KB of HTML</div></div>`;
   content.innerHTML = `<div class="detail-back"><button onclick="location.href='blog.html'">← Posts</button> / Blog editor</div><div class="page-heading"><div><p class="eyebrow">Content</p><h1>${id ? 'Edit post' : 'New post'}</h1></div><div class="actions"><button class="btn secondary" id="blog-preview-btn" type="button">Preview</button><button class="btn" id="blog-save-btn" type="button">Save</button></div></div><div id="blog-save-banner" class="blog-success-banner hidden">Blog saved.</div><form id="blog-editor" class="blog-editor-layout"><div class="blog-main panel"><div class="field blog-field"><label>Title</label><input name="title" class="blog-text-input" required placeholder="Give your story a clear title"></div><div class="field blog-field"><label>URL slug / handle</label><input name="slug" class="blog-text-input" placeholder="your-post-slug"></div><div class="field blog-field"><label>Body</label>${editorMarkup('blog-body', 'body', 'Post body')}</div><div class="field blog-field"><label>Excerpt / summary</label>${editorMarkup('blog-excerpt', 'excerpt', 'Post excerpt', true)}</div></div><aside class="blog-side-panel panel"><div class="field blog-field"><label>Category</label><input name="category" class="blog-text-input" placeholder="Travel, Guide, Experience..."></div><div class="field blog-field"><label>Primary keyword</label><input name="primaryKeyword" class="blog-text-input" placeholder="Primary keyword"></div><div class="field blog-field"><label>Tags</label><input name="tags" class="blog-text-input" placeholder="Comma separated"></div><div class="field blog-field"><label>SEO title</label><input name="metaTitle" class="blog-text-input" placeholder="SEO title"></div><div class="field blog-field"><label>SEO description</label><textarea name="metaDescription" rows="3" class="blog-editor-input blog-summary-input" placeholder="Short meta description"></textarea></div><div class="field blog-field"><label>Author</label><select name="authorId" class="blog-select"><option value="">Loading staff accounts...</option></select></div><div class="field blog-field"><label>Status</label><select name="status" class="blog-select"><option value="DRAFT">Draft</option><option value="SCHEDULED">Scheduled</option><option value="PUBLISHED">Published</option><option value="ARCHIVED">Archived</option></select></div><div class="field blog-field"><label>Scheduled publish</label><input name="scheduledAt" class="blog-text-input" type="datetime-local"></div><div class="field blog-field"><label>Featured image</label><div class="image-upload-box"><div class="image-upload-preview" id="featured-image-preview">No image selected</div><div class="featured-upload-actions"><button type="button" class="btn secondary" id="featured-image-trigger">Upload image</button><input type="hidden" name="featuredImage" value=""><input type="file" id="featured-image-input" accept="image/*" class="hidden"><span class="subtle" id="featured-image-name">No file chosen</span></div></div></div><div class="field blog-field"><label>Featured image alt text</label><input name="imageAltText" class="blog-text-input" placeholder="Describe the feature image"></div></aside></form>`;
 
   const editor = document.querySelector('#blog-editor');

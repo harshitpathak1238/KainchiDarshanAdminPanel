@@ -140,9 +140,11 @@ tbody tr:hover { background: #f7f7f8; }
 .editor-format-btn { border: 1px solid var(--line); border-radius: 4px; background: #f7f7f8; color: var(--ink); padding: 7px 10px; min-width: 38px; }
 .rich-editor { border: 1px solid var(--line-strong); border-radius: 4px; background: #fff; }
 .rich-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 8px; border-bottom: 1px solid var(--line); background: #f7f7f8; }
-.rich-toolbar button { min-height: 30px; padding: 5px 9px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--ink); font-size: 12px; }
+.rich-toolbar button { display: inline-grid; place-items: center; width: 32px; min-height: 30px; padding: 5px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 600; }
 .rich-toolbar button:hover, .rich-toolbar button:focus-visible { border-color: var(--line-strong); background: #fff; }
-.rich-toolbar .source-toggle { margin-left: auto; border-color: var(--line-strong); background: #fff; font-weight: 600; }
+.rich-toolbar button.active { border-color: #8fc9b4; background: #dff1e8; color: #006b4f; box-shadow: inset 0 0 0 1px rgba(0,128,96,.12); }
+.rich-toolbar .source-toggle { width: auto; margin-left: auto; padding: 5px 9px; border-color: var(--line-strong); background: #fff; font-weight: 600; }
+.rich-toolbar .source-toggle.active { border-color: #8fc9b4; background: #dff1e8; color: #006b4f; }
 .rich-canvas, .rich-source { min-width: 0; min-height: 260px; padding: 14px; outline: 0; line-height: 1.65; overflow-wrap: anywhere; }
 .rich-canvas:focus, .rich-source:focus { box-shadow: inset 0 0 0 2px rgba(0,111,187,.2); }
 .rich-canvas img { max-width: 100%; height: auto; }
