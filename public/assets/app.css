@@ -22,7 +22,7 @@
   background: var(--bg);
 }
 * { box-sizing: border-box; }
-html, body, #app { width: 100%; min-width: 0; }
+html, body, #app { width: 100%; }
 body { margin: 0; background: var(--bg); color: var(--ink); font-size: 14px; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
