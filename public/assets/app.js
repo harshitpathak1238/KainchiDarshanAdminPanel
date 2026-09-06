@@ -9,6 +9,10 @@ const navGroups = [
   { label: 'Content', items: [['blog', '▤', 'Blog'], ['media', '▧', 'Media Library'], ['settings', '⚙', 'Settings']] },
 ];
 const labels = Object.fromEntries(navGroups.flatMap(group => group.items.map(item => [item[0], item[2]])));
+const pageFiles = {
+  dashboard: 'dashboard.html', orders: 'orders.html', listings: 'listings.html', stays: 'stays.html', rides: 'rides.html', rentals: 'rentals.html', activities: 'activities.html', packages: 'packages.html',
+  customers: 'customers.html', partners: 'partners.html', pickups: 'pickups.html', payouts: 'payouts.html', analytics: 'analytics.html', blog: 'blog.html', media: 'media.html', settings: 'settings.html',
+};
 
 async function api(path, options = {}) {
   const request = { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } };
@@ -54,11 +58,21 @@ function renderShell() {
   document.querySelectorAll('[data-route]').forEach(button => button.onclick = () => navigate(button.dataset.route));
   document.querySelector('#mobile-menu').onclick = () => document.querySelector('#sidebar').classList.toggle('open');
   document.querySelector('#sign-out').onclick = async () => { try { await api('auth/logout', { method: 'POST' }); state.user = null; renderLogin(); } catch (error) { toast(error.message); } };
-  navigate(location.hash.slice(1) || 'dashboard');
+  const page = document.body.dataset.page;
+  renderRoute(page || location.hash.slice(1) || 'dashboard');
 }
 
 function navigate(route) {
-  state.route = route; state.page = 1; location.hash = route;
+  if (pageFiles[route] && document.body.dataset.page !== route) {
+    location.href = pageFiles[route];
+    return;
+  }
+  renderRoute(route);
+}
+
+function renderRoute(route) {
+  state.route = route; state.page = 1;
+  if (route === 'blog-editor') return blogForm(new URLSearchParams(location.search).get('id') || '');
   document.querySelector('#content')?.classList.remove('content-blog-editor');
   document.querySelectorAll('[data-route]').forEach(button => button.classList.toggle('active', button.dataset.route === route));
   document.querySelector('#sidebar')?.classList.remove('open');
@@ -138,7 +152,7 @@ async function blogPage() {
   const toolbar = `
     <div class="blog-toolbar">
       <div class="blog-toolbar-actions">
-        <button class="btn btn-primary" onclick="blogForm()">Add new</button>
+        <button class="btn btn-primary" onclick="location.href='blog-new.html'">Add new</button>
       </div>
       <div class="blog-toolbar-filters">
         <input id="resource-search" placeholder="Search posts">
@@ -188,7 +202,7 @@ async function loadBlog() {
           <div class="blog-col status-col">${badge(post.status)}</div>
           <div class="blog-col date-col">${date(post.publishedAt || post.scheduledAt || post.createdAt)}</div>
           <div class="blog-col action-col">
-            <button class="icon-btn" title="Edit post" onclick="blogForm('${post.id}')">✎</button>
+            <button class="icon-btn" title="Edit post" onclick="location.href='blog-edit.html?id=${encodeURIComponent(post.id)}'">✎</button>
             <button class="icon-btn danger" title="Delete post" onclick="deleteBlogPost('${post.id}')">🗑</button>
           </div>
         </div>
@@ -307,7 +321,7 @@ async function blogForm(id = '') {
   const content = document.querySelector('#content');
   content.classList.add('content-blog-editor');
   const editorMarkup = (id, name, label, small = false) => `<div class="rich-editor" id="${id}-editor"><div class="rich-toolbar"><button type="button" data-editor-command="bold"><strong>B</strong></button><button type="button" data-editor-command="italic"><em>I</em></button><button type="button" data-editor-command="h2">H2</button><button type="button" data-editor-command="h3">H3</button><button type="button" data-editor-command="insertUnorderedList">• List</button><button type="button" data-editor-command="insertOrderedList">1. List</button><button type="button" data-editor-command="blockquote">Quote</button><button type="button" data-editor-command="link">Link</button>${small ? '' : '<button type="button" data-editor-command="table">Table</button><button type="button" data-editor-command="image">Image</button><button type="button" data-editor-command="video">Video</button>'}<button type="button" class="source-toggle" data-editor-toggle>Edit code</button></div><div class="rich-canvas" contenteditable="true" role="textbox" aria-label="${label}"></div><textarea name="${name}" class="rich-source blog-editor-input hidden" rows="${small ? 5 : 18}" aria-label="${label} HTML"></textarea><div class="content-size-warning">0 KB of HTML</div></div>`;
-  content.innerHTML = `<div class="detail-back"><button onclick="blogPage()">← Posts</button> / Blog editor</div><div class="page-heading"><div><p class="eyebrow">Content</p><h1>${id ? 'Edit post' : 'New post'}</h1></div><div class="actions"><button class="btn secondary" id="blog-preview-btn" type="button">Preview</button><button class="btn" id="blog-save-btn" type="button">Save</button></div></div><div id="blog-save-banner" class="blog-success-banner hidden">Blog saved.</div><form id="blog-editor" class="blog-editor-layout"><div class="blog-main panel"><div class="field blog-field"><label>Title</label><input name="title" class="blog-text-input" required placeholder="Give your story a clear title"></div><div class="field blog-field"><label>URL slug / handle</label><input name="slug" class="blog-text-input" placeholder="your-post-slug"></div><div class="field blog-field"><label>Body</label>${editorMarkup('blog-body', 'body', 'Post body')}</div><div class="field blog-field"><label>Excerpt / summary</label>${editorMarkup('blog-excerpt', 'excerpt', 'Post excerpt', true)}</div></div><aside class="blog-side-panel panel"><div class="field blog-field"><label>Category</label><input name="category" class="blog-text-input" placeholder="Travel, Guide, Experience..."></div><div class="field blog-field"><label>Primary keyword</label><input name="primaryKeyword" class="blog-text-input" placeholder="Primary keyword"></div><div class="field blog-field"><label>Tags</label><input name="tags" class="blog-text-input" placeholder="Comma separated"></div><div class="field blog-field"><label>SEO title</label><input name="metaTitle" class="blog-text-input" placeholder="SEO title"></div><div class="field blog-field"><label>SEO description</label><textarea name="metaDescription" rows="3" class="blog-editor-input blog-summary-input" placeholder="Short meta description"></textarea></div><div class="field blog-field"><label>Author</label><select name="authorId" class="blog-select"><option value="">Loading staff accounts...</option></select></div><div class="field blog-field"><label>Status</label><select name="status" class="blog-select"><option value="DRAFT">Draft</option><option value="SCHEDULED">Scheduled</option><option value="PUBLISHED">Published</option><option value="ARCHIVED">Archived</option></select></div><div class="field blog-field"><label>Scheduled publish</label><input name="scheduledAt" class="blog-text-input" type="datetime-local"></div><div class="field blog-field"><label>Featured image</label><div class="image-upload-box"><div class="image-upload-preview" id="featured-image-preview">No image selected</div><div class="featured-upload-actions"><button type="button" class="btn secondary" id="featured-image-trigger">Upload image</button><input type="hidden" name="featuredImage" value=""><input type="file" id="featured-image-input" accept="image/*" class="hidden"><span class="subtle" id="featured-image-name">No file chosen</span></div></div></div><div class="field blog-field"><label>Featured image alt text</label><input name="imageAltText" class="blog-text-input" placeholder="Describe the feature image"></div></aside></form>`;
+  content.innerHTML = `<div class="detail-back"><button onclick="location.href='blog.html'">← Posts</button> / Blog editor</div><div class="page-heading"><div><p class="eyebrow">Content</p><h1>${id ? 'Edit post' : 'New post'}</h1></div><div class="actions"><button class="btn secondary" id="blog-preview-btn" type="button">Preview</button><button class="btn" id="blog-save-btn" type="button">Save</button></div></div><div id="blog-save-banner" class="blog-success-banner hidden">Blog saved.</div><form id="blog-editor" class="blog-editor-layout"><div class="blog-main panel"><div class="field blog-field"><label>Title</label><input name="title" class="blog-text-input" required placeholder="Give your story a clear title"></div><div class="field blog-field"><label>URL slug / handle</label><input name="slug" class="blog-text-input" placeholder="your-post-slug"></div><div class="field blog-field"><label>Body</label>${editorMarkup('blog-body', 'body', 'Post body')}</div><div class="field blog-field"><label>Excerpt / summary</label>${editorMarkup('blog-excerpt', 'excerpt', 'Post excerpt', true)}</div></div><aside class="blog-side-panel panel"><div class="field blog-field"><label>Category</label><input name="category" class="blog-text-input" placeholder="Travel, Guide, Experience..."></div><div class="field blog-field"><label>Primary keyword</label><input name="primaryKeyword" class="blog-text-input" placeholder="Primary keyword"></div><div class="field blog-field"><label>Tags</label><input name="tags" class="blog-text-input" placeholder="Comma separated"></div><div class="field blog-field"><label>SEO title</label><input name="metaTitle" class="blog-text-input" placeholder="SEO title"></div><div class="field blog-field"><label>SEO description</label><textarea name="metaDescription" rows="3" class="blog-editor-input blog-summary-input" placeholder="Short meta description"></textarea></div><div class="field blog-field"><label>Author</label><select name="authorId" class="blog-select"><option value="">Loading staff accounts...</option></select></div><div class="field blog-field"><label>Status</label><select name="status" class="blog-select"><option value="DRAFT">Draft</option><option value="SCHEDULED">Scheduled</option><option value="PUBLISHED">Published</option><option value="ARCHIVED">Archived</option></select></div><div class="field blog-field"><label>Scheduled publish</label><input name="scheduledAt" class="blog-text-input" type="datetime-local"></div><div class="field blog-field"><label>Featured image</label><div class="image-upload-box"><div class="image-upload-preview" id="featured-image-preview">No image selected</div><div class="featured-upload-actions"><button type="button" class="btn secondary" id="featured-image-trigger">Upload image</button><input type="hidden" name="featuredImage" value=""><input type="file" id="featured-image-input" accept="image/*" class="hidden"><span class="subtle" id="featured-image-name">No file chosen</span></div></div></div><div class="field blog-field"><label>Featured image alt text</label><input name="imageAltText" class="blog-text-input" placeholder="Describe the feature image"></div></aside></form>`;
 
   const editor = document.querySelector('#blog-editor');
   const bodyEditor = initializeRichEditor(document.querySelector('#blog-body-editor'));
@@ -365,7 +379,7 @@ async function blogForm(id = '') {
       await api(`blog${id ? `/${id}` : ''}`, { method: id ? 'PATCH' : 'POST', body: data });
       saveBanner.classList.remove('hidden');
       toast('Blog post saved successfully.');
-      if (!id) blogPage();
+      if (!id) location.href = 'blog.html';
     } catch (error) {
       toast(`Blog post save failed: ${error.message}`);
     }

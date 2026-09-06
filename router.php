@@ -16,6 +16,16 @@ if (str_starts_with($path, '/admin/api/')) {
     return true;
 }
 
+if (str_starts_with($path, '/admin/') && preg_match('#^/admin/([a-z-]+\.html)$#', $path, $matches)) {
+    $page = __DIR__ . '/public/' . $matches[1];
+    if (is_file($page)) {
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+        require $page;
+        return true;
+    }
+}
+
 if ($path === '/admin' || $path === '/admin/') {
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
     header('Pragma: no-cache');
