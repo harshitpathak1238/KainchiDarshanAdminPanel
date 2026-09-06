@@ -3,9 +3,11 @@ require __DIR__ . '/lib.php';
 
 $path = trim(parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH), '/');
 $parts = explode('/', $path);
-$resource = $parts[2] ?? '';
-$id = isset($parts[3]) && $parts[3] !== '' ? $parts[3] : null;
-$action = $parts[3] ?? null;
+$apiIndex = array_search('api', $parts, true);
+$resourceIndex = $apiIndex === false ? 0 : $apiIndex + 1;
+$resource = $parts[$resourceIndex] ?? '';
+$id = isset($parts[$resourceIndex + 1]) && $parts[$resourceIndex + 1] !== '' ? $parts[$resourceIndex + 1] : null;
+$action = $parts[$resourceIndex + 1] ?? null;
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 try {
