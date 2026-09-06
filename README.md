@@ -8,7 +8,7 @@ A Hostinger-ready admin console built with PHP 8+, MySQL/MariaDB, semantic HTML,
 2. Create a MySQL database and user in hPanel and import `database.sql` in phpMyAdmin.
 3. For an existing Pahadi Stay database, do not import `database.sql`; import `admin_migration.sql` instead to add only admin settings and audit tables.
 3. Copy `config.example.php` to `config.php` and fill in the database credentials. Keep `config.php` outside the public directory when possible; otherwise the included rules deny direct access.
-4. Create `storage/uploads` and make it writable by PHP. Keep private files outside executable PHP paths.
+4. Create `../uploads/images` relative to the admin directory, normally `public_html/uploads/images`, and make it writable by PHP. Keep private files outside executable PHP paths.
 5. Enable HTTPS, set `secure_cookies` to `true`, and open `/admin/` on the existing domain.
 6. Open `/admin/` and enter one of the three allowlisted admin emails configured in `api/lib.php`. No password is used by this login flow.
 7. Add a cron job to call `cron/publish_scheduled.php` every five minutes if scheduled blog publishing is needed.
