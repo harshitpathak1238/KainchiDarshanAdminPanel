@@ -339,7 +339,16 @@ async function blogForm(id = '') {
     const authorSelect = document.querySelector('[name="authorId"]');
     authorSelect.innerHTML = '<option value="">Select staff account</option>' + authors.map(author => `<option value="${escapeHtml(author.id)}">${escapeHtml(author.name)} · ${escapeHtml(author.role)}</option>`).join('');
     if (state.user?.id) authorSelect.value = state.user.id;
-  } catch (error) { toast(`Unable to load staff accounts: ${error.message}`); }
+  } catch (error) {
+    const authorSelect = document.querySelector('[name="authorId"]');
+    if (state.user?.id) {
+      authorSelect.innerHTML = `<option value="${escapeHtml(state.user.id)}">${escapeHtml(state.user.name)} · ${escapeHtml(state.user.role)}</option>`;
+      authorSelect.value = state.user.id;
+    } else {
+      authorSelect.innerHTML = '<option value="">Staff accounts unavailable</option>';
+    }
+    toast(`Staff list unavailable: ${error.message}`);
+  }
 
   document.querySelector('#featured-image-trigger').addEventListener('click', () => {
     document.querySelector('#featured-image-input').click();
@@ -408,7 +417,11 @@ async function blogForm(id = '') {
       form.querySelector('[name="tags"]').value = Array.isArray(post.tags) ? post.tags.join(', ') : (post.tags || '');
       form.querySelector('[name="metaTitle"]').value = post.metaTitle || '';
       form.querySelector('[name="metaDescription"]').value = post.metaDescription || '';
-      form.querySelector('[name="authorId"]').value = post.authorId || '';
+      const authorSelect = form.querySelector('[name="authorId"]');
+      if (post.authorId && !authorSelect.querySelector(`option[value="${CSS.escape(post.authorId)}"]`)) {
+        authorSelect.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(post.authorId)}">${escapeHtml(post.authorName || 'Existing author')}</option>`);
+      }
+      authorSelect.value = post.authorId || authorSelect.value || '';
       form.querySelector('[name="status"]').value = post.status || 'DRAFT';
       form.querySelector('[name="scheduledAt"]').value = post.scheduledAt ? post.scheduledAt.replace(' ', 'T').slice(0, 16) : '';
       form.querySelector('[name="featuredImage"]').value = post.featuredImage || '';
