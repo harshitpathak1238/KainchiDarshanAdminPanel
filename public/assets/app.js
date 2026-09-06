@@ -125,7 +125,21 @@ async function listingsPage(route) {
 }
 async function loadListings(category = '') {
   const params = new URLSearchParams({ category, search: document.querySelector('#resource-search')?.value || '', status: document.querySelector('#resource-status')?.value || '', page: state.page, perPage: state.perPage });
-  try { const result = await api(`listings?${params}`); const rows = result.map(item => [`<span class="row-title">${escapeHtml(item.title)}</span><div class="row-meta">/${escapeHtml(item.slug)}</div>`, badge(item.category), escapeHtml(item.partner_name || 'Unassigned'), escapeHtml(item.location), `₹${money(item.base_price)} → ₹${money(item.sell_price)}`, badge(item.status), `<button class="btn secondary" onclick="event.stopPropagation();listingForm('${item.category}','${item.id}')">Edit</button>`]); document.querySelector('#resource-table').innerHTML = table(['Listing', 'Category', 'Partner', 'Location', 'Price', 'Status', ''], rows); } catch (error) { document.querySelector('#resource-table').innerHTML = `<div class="empty">Listings request failed: ${escapeHtml(error.message)}</div>`; }
+  try {
+    let result;
+    try {
+      result = await api(`listings?${params}`);
+    } catch (error) {
+      if (!category) throw error;
+      const fallbackParams = new URLSearchParams({ search: document.querySelector('#resource-search')?.value || '', status: document.querySelector('#resource-status')?.value || '', page: 1, perPage: 100 });
+      const allListings = await api(`listings?${fallbackParams}`);
+      result = allListings.filter(item => String(item.category || '').toUpperCase() === category);
+    }
+    const rows = result.map(item => [`<span class="row-title">${escapeHtml(item.title)}</span><div class="row-meta">/${escapeHtml(item.slug)}</div>`, badge(item.category), escapeHtml(item.partner_name || 'Unassigned'), escapeHtml(item.location), `₹${money(item.base_price)} → ₹${money(item.sell_price)}`, badge(item.status), `<button class="btn secondary" onclick="event.stopPropagation();listingForm('${item.category}','${item.id}')">Edit</button>`]);
+    document.querySelector('#resource-table').innerHTML = table(['Listing', 'Category', 'Partner', 'Location', 'Price', 'Status', ''], rows);
+  } catch (error) {
+    document.querySelector('#resource-table').innerHTML = `<div class="empty">Listings request failed: ${escapeHtml(error.message)}</div>`;
+  }
 }
 function listingForm(category = '', id = '') {
   openDrawer(`<div class="drawer-head"><div><p class="eyebrow">Catalog</p><h2>${id ? 'Edit listing' : 'Add listing'}</h2></div><button class="btn secondary" onclick="closeDrawer()">Close</button></div><form id="listing-form"><div class="form-grid"><div class="field span-2"><label>Title</label><input name="title" required></div><div class="field"><label>Category</label><select name="category"><option>STAY</option><option>RIDE</option><option>RENTAL</option><option>ACTIVITY</option></select></div><div class="field"><label>Location</label><input name="location" required></div><div class="field"><label>Base price (INR)</label><input name="base_price" type="number" min="0" step="0.01" value="0"></div><div class="field"><label>Selling price (INR)</label><input name="sell_price" type="number" min="0" step="0.01" value="0"></div><div class="field"><label>Status</label><select name="status"><option>DRAFT</option><option>LIVE</option><option>PAUSED</option><option>PENDING_REVIEW</option></select></div><div class="field span-2"><label>Description</label><textarea name="description" rows="6"></textarea></div></div><div id="form-save-bar" class="save-bar hidden"><span>Unsaved changes</span><div class="actions"><button type="button" class="btn secondary" onclick="closeDrawer()">Discard</button><button class="btn">Save listing</button></div></div></form></div>`);
