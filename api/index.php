@@ -69,8 +69,23 @@ try {
     require_auth();
 
     if ($resource === 'blog-authors' && $method === 'GET') {
-        $authors = db()->query("SELECT id, name, email, role FROM `User` WHERE role IN ('OWNER','ADMIN','STAFF') AND isActive = 1 ORDER BY name ASC")->fetchAll();
-        respond($authors);
+        try {
+            $authors = db()->query("SELECT id, name, email, role FROM `User` WHERE role IN ('OWNER','ADMIN','STAFF') AND isActive = 1 ORDER BY name ASC")->fetchAll();
+            respond($authors);
+        } catch (Throwable $error) {
+            global $config;
+            $database = $config['db'] ?? [];
+            error_log(sprintf(
+                '[blog-authors] Database failure: %s | SQLSTATE=%s | host=%s | database=%s | user=%s | request=%s',
+                $error->getMessage(),
+                $error instanceof PDOException ? (string) $error->getCode() : 'n/a',
+                $database['host'] ?? 'unknown',
+                $database['name'] ?? 'unknown',
+                $database['user'] ?? 'unknown',
+                $_SERVER['REQUEST_URI'] ?? '/api/blog-authors'
+            ));
+            fail('Staff accounts could not be loaded. Check the server database log.', 503);
+        }
     }
 
     if ($resource === 'dashboard' && $method === 'GET') {
